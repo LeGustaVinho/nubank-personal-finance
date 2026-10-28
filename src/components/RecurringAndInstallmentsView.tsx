@@ -736,10 +736,10 @@ export const RecurringAndInstallmentsView: React.FC<
                   }`}
                 >
                   {/* Card Top Header */}
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="space-y-2 min-w-0">
+                  <div className="flex flex-wrap sm:flex-nowrap items-start justify-between gap-4">
+                    <div className="space-y-2 min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h4 className="text-base font-bold text-white truncate">
+                        <h4 className="text-base font-bold text-white break-words">
                           {srv.merchantGroup}
                         </h4>
 
@@ -843,29 +843,36 @@ export const RecurringAndInstallmentsView: React.FC<
                   </div>
 
                   {/* Clean Key Metrics Row */}
-                  <div className="grid grid-cols-3 gap-3 my-4 p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 text-xs">
-                    <div>
-                      <span className="text-slate-400 block text-[11px]">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 my-4 text-xs">
+                    <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 min-w-0">
+                      <span className="text-slate-400 block text-[11px] truncate">
                         Última Cobrança
                       </span>
-                      <span className="font-semibold text-white">
+                      <span className="font-semibold text-white block truncate mt-0.5">
                         {formatBRL(srv.lastChargeAmount)}
                       </span>
-                      <span className="text-[10px] text-slate-500 block">
+                      <span className="text-[10px] text-slate-500 block truncate">
                         em {formatDateBR(srv.lastChargeDate)}
                       </span>
                     </div>
 
-                    <div>
-                      <span className="text-slate-400 block text-[11px]">
+                    <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 min-w-0">
+                      <span className="text-slate-400 block text-[11px] truncate">
                         Faixa Mensal (Min – Máx)
                       </span>
-                      <span className="font-semibold text-slate-200">
+                      <span
+                        className="font-semibold text-slate-200 block truncate mt-0.5"
+                        title={
+                          srv.minMonthly === srv.maxMonthly
+                            ? formatBRL(srv.minMonthly)
+                            : `${formatBRL(srv.minMonthly)} – ${formatBRL(srv.maxMonthly)}`
+                        }
+                      >
                         {srv.minMonthly === srv.maxMonthly
                           ? formatBRL(srv.minMonthly)
                           : `${formatBRL(srv.minMonthly)} – ${formatBRL(srv.maxMonthly)}`}
                       </span>
-                      <span className="text-[10px] text-slate-500 block">
+                      <span className="text-[10px] text-slate-500 block truncate">
                         {srv.costType === 'fixed_cost' ||
                         srv.costType === 'digital_subscription'
                           ? 'Previsível / Recorrente'
@@ -873,11 +880,11 @@ export const RecurringAndInstallmentsView: React.FC<
                       </span>
                     </div>
 
-                    <div>
-                      <span className="text-slate-400 block text-[11px]">
+                    <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 min-w-0">
+                      <span className="text-slate-400 block text-[11px] truncate">
                         {srv.isInternational ? 'IOF Acumulado' : 'Ticket por Uso'}
                       </span>
-                      <span className="font-semibold text-slate-200">
+                      <span className="font-semibold text-slate-200 block truncate mt-0.5">
                         {srv.isInternational
                           ? formatBRL(srv.totalIof)
                           : formatBRL(
@@ -886,7 +893,7 @@ export const RecurringAndInstallmentsView: React.FC<
                                 : srv.totalSpent
                             )}
                       </span>
-                      <span className="text-[10px] text-slate-500 block">
+                      <span className="text-[10px] text-slate-500 block truncate">
                         {srv.isInternational
                           ? 'Imposto já somado ao total'
                           : `${srv.totalOccurrences}x no período`}
@@ -894,63 +901,82 @@ export const RecurringAndInstallmentsView: React.FC<
                     </div>
                   </div>
 
-                  {/* Visual Monthly Sparkbars + Expand Button */}
-                  <div className="flex items-end justify-between gap-4 pt-1">
-                    <div className="flex-1">
-                      <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1.5">
+                  {/* Full-Width Non-Overlapping Monthly Sparkbars Section */}
+                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
                         Histórico Mês a Mês ({allMonths.length} meses)
                       </span>
-                      <div className="grid grid-cols-11 gap-1.5 items-end h-12">
-                        {allMonths.map((m) => {
-                          const val = srv.byMonth.get(m) || 0;
-                          const heightPct =
-                            srv.maxMonthly > 0 && val > 0
-                              ? Math.max(22, Math.round((val / srv.maxMonthly) * 100))
-                              : 8;
-                          return (
-                            <div
-                              key={m}
-                              className="flex flex-col items-center gap-1 h-full justify-end group relative"
-                              title={`${formatMonthShort(m)}: ${
-                                val > 0 ? formatBRL(val) : 'Sem cobrança'
-                              }`}
-                            >
-                              <div className="w-full h-8 flex items-end">
-                                <div
-                                  className={`w-full rounded-t transition-all ${
-                                    val > 0
-                                      ? srv.costType === 'digital_subscription'
-                                        ? 'bg-violet-500 group-hover:bg-violet-400'
-                                        : srv.costType === 'fixed_cost'
-                                        ? 'bg-cyan-500 group-hover:bg-cyan-400'
-                                        : 'bg-amber-500 group-hover:bg-amber-400'
-                                      : 'bg-slate-800/70'
-                                  }`}
-                                  style={{ height: `${heightPct}%` }}
-                                />
-                              </div>
-                              <span className="text-[9px] font-mono text-slate-400">
-                                {formatMonthShort(m).split('/')[0]}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
+
+                      <button
+                        onClick={() =>
+                          setExpandedService(isExpanded ? null : srv.merchantGroup)
+                        }
+                        className="px-2.5 py-1 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-[11px] font-medium text-slate-200 flex items-center gap-1 shrink-0 cursor-pointer transition"
+                      >
+                        <span>{isExpanded ? 'Ocultar detalhes' : 'Ver cobranças'}</span>
+                        {isExpanded ? (
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        ) : (
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        )}
+                      </button>
                     </div>
 
-                    <button
-                      onClick={() =>
-                        setExpandedService(isExpanded ? null : srv.merchantGroup)
-                      }
-                      className="px-3 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-xs font-medium text-slate-200 flex items-center gap-1.5 shrink-0 cursor-pointer"
+                    <div
+                      className="grid gap-1.5 items-end pt-1"
+                      style={{
+                        gridTemplateColumns: `repeat(${Math.max(
+                          1,
+                          allMonths.length
+                        )}, minmax(0, 1fr))`,
+                      }}
                     >
-                      <span>{isExpanded ? 'Ocultar histórico' : 'Ver cobranças'}</span>
-                      {isExpanded ? (
-                        <ChevronUp className="w-4 h-4" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4" />
-                      )}
-                    </button>
+                      {allMonths.map((m) => {
+                        const rawVal = srv.byMonth.get(m) || 0;
+                        const val = Math.max(0, rawVal);
+                        const heightPct =
+                          srv.maxMonthly > 0 && val > 0
+                            ? Math.min(
+                                100,
+                                Math.max(18, Math.round((val / srv.maxMonthly) * 100))
+                              )
+                            : 10;
+                        const shortMonthLabel = formatMonthShort(m)
+                          .split('/')[0]
+                          .replace('.', '');
+
+                        return (
+                          <div
+                            key={m}
+                            className="flex flex-col items-center min-w-0 group"
+                            title={`${formatMonthShort(m)}: ${
+                              val > 0 ? formatBRL(val) : 'Sem cobrança'
+                            }`}
+                          >
+                            {/* Isolated Bar Track with strict overflow containment */}
+                            <div className="w-full h-12 bg-slate-900/70 rounded-md p-0.5 flex items-end overflow-hidden border border-slate-800/50">
+                              <div
+                                className={`w-full rounded-sm transition-all ${
+                                  val > 0
+                                    ? srv.costType === 'digital_subscription'
+                                      ? 'bg-violet-500 group-hover:bg-violet-400'
+                                      : srv.costType === 'fixed_cost'
+                                      ? 'bg-cyan-500 group-hover:bg-cyan-400'
+                                      : 'bg-amber-500 group-hover:bg-amber-400'
+                                    : 'bg-slate-800/40'
+                                }`}
+                                style={{ height: `${heightPct}%` }}
+                              />
+                            </div>
+                            {/* Non-overlapping Month Label */}
+                            <span className="text-[9px] font-mono text-slate-400 mt-1.5 truncate w-full text-center capitalize">
+                              {shortMonthLabel}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   {/* Expanded History Drawer */}
