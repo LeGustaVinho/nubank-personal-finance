@@ -31,11 +31,20 @@ import {
 import { GroupingRule, SourceType } from './types.ts';
 
 const app = express();
-const PORT = 3001;
+const PORT = Number(process.env.API_PORT || process.env.PORT || 3001);
 const ROOT_DIR = process.cwd();
 
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
+
+app.get('/api/health', (_req, res) => {
+  res.json({
+    app: 'financas-nubank-analytics',
+    status: 'ok',
+    apiPort: PORT,
+    pid: process.pid,
+  });
+});
 
 function getFullState() {
   const config = loadUserConfig();
@@ -374,6 +383,12 @@ app.put('/api/cost-types', (req, res) => {
     res.status(500).json({ error: err?.message || 'Erro ao atualizar tipo de custo' });
   }
 });
+
+// Serve production build static files if dist/ exists
+const distPath = path.join(ROOT_DIR, 'dist');
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+}
 
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {

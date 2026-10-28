@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "start": "tsx server/launcher.ts",
     "dev": "concurrently -k -n SERVER,WEB -c cyan,magenta \"tsx watch server/index.ts\" \"vite\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:web": "vite",
