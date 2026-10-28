@@ -5,7 +5,7 @@ import {
   LearnedPatternEntry,
   GroupingRule,
 } from './types.ts';
-import { buildNormalizedTokenKey } from './groupingEngine.ts';
+import { buildNormalizedTokenKey, normalizeForMatch } from './groupingEngine.ts';
 
 /**
  * Post-processes all loaded transactions to automatically unify any unruled counterparties
@@ -20,7 +20,27 @@ export function applyCrossTransactionEntityResolution(
     { merchantGroup: string; category: string; count: number; hasRule: boolean }
   >();
 
+  // Also index known canonical groups (from rules/learned patterns) by normalized name for truncated CC prefix resolution
+  const knownCanonicalGroups: Array<{
+    normGroup: string;
+    merchantGroup: string;
+    category: string;
+  }> = [];
+  const seenNormGroups = new Set<string>();
+
   for (const tx of transactions) {
+    if (tx.matchedRuleId !== null) {
+      const normG = normalizeForMatch(tx.merchantGroup);
+      if (normG.length >= 16 && !seenNormGroups.has(normG)) {
+        seenNormGroups.add(normG);
+        knownCanonicalGroups.push({
+          normGroup: normG,
+          merchantGroup: tx.merchantGroup,
+          category: tx.category,
+        });
+      }
+    }
+
     if (!tx.documentId) continue;
     const existing = docCanonicalMap.get(tx.documentId);
     const isRuled = tx.matchedRuleId !== null;
@@ -46,7 +66,7 @@ export function applyCrossTransactionEntityResolution(
     }
   }
 
-  // 2. Apply document cluster unification where multiple transactions share a CPF/CNPJ
+  // 2. Apply document cluster unification and truncated credit-card prefix unification
   return transactions.map((tx) => {
     if (tx.documentId && !tx.matchedRuleId) {
       const canonical = docCanonicalMap.get(tx.documentId);
@@ -62,6 +82,26 @@ export function applyCrossTransactionEntityResolution(
         };
       }
     }
+
+    // Unify 15+ char truncated creditCard descriptors (e.g. "Marthus Henrique Coelh") with known full names
+    if (!tx.matchedRuleId && tx.source === 'creditCard') {
+      const normCp = normalizeForMatch(tx.extractedCounterparty);
+      if (normCp.length >= 15) {
+        const prefixMatch = knownCanonicalGroups.find(
+          (kg) => kg.normGroup.startsWith(normCp) && kg.normGroup.length > normCp.length
+        );
+        if (prefixMatch) {
+          return {
+            ...tx,
+            merchantGroup: prefixMatch.merchantGroup,
+            category: prefixMatch.category,
+            classificationSource: 'document-cluster',
+            confidence: 90,
+          };
+        }
+      }
+    }
+
     return tx;
   });
 }

@@ -13,6 +13,7 @@ import {
 import {
   matchGroupingRule,
   extractDocumentId,
+  normalizeForMatch,
 } from './groupingEngine.ts';
 import { applyCrossTransactionEntityResolution } from './intelligenceEngine.ts';
 
@@ -130,7 +131,9 @@ export function parseBankAccountRow(
   const rawDate = row['Data'] || '';
   const rawVal = row['Valor'] || '0';
   const rawId = (row['Identificador'] || '').trim();
-  const rawDescription = (row['Descrição'] || row['Descricao'] || '').trim();
+  const rawDescription = (row['Descrição'] || row['Descricao'] || '')
+    .replace(/&amp;/gi, '&')
+    .trim();
 
   if (!rawDate || !rawId) return null;
 
@@ -139,20 +142,30 @@ export function parseBankAccountRow(
   const rawAmount = Math.round(Number.parseFloat(rawVal) * 100) / 100;
   const id = `${rawId}_${rawAmount >= 0 ? 'in' : 'out'}_${Math.abs(rawAmount).toFixed(2)}`;
 
+  const documentId = extractDocumentId(rawDescription);
   const parts = rawDescription.split(' - ').map((p) => p.trim());
   const prefix = parts[0] || 'Movimentação em Conta';
+  const docPartIdx = documentId ? parts.findIndex((p) => p.includes(documentId)) : -1;
 
   let operationType = prefix;
-  let extractedCounterparty = parts[1] || prefix;
-  let subDetail: string | null = parts.length > 2 ? parts.slice(2).join(' • ') : null;
+  let extractedCounterparty =
+    docPartIdx > 1
+      ? parts.slice(1, docPartIdx).join(' - ')
+      : parts.length > 1
+      ? parts.slice(1).join(' - ')
+      : prefix;
+  let subDetail: string | null =
+    docPartIdx > 1 ? parts.slice(docPartIdx).join(' • ') : null;
 
   if (prefix.toLowerCase() === 'estorno' && parts.length >= 3) {
     operationType = `Estorno (${parts[1]})`;
-    extractedCounterparty = parts[2];
+    extractedCounterparty =
+      docPartIdx > 2
+        ? parts.slice(2, docPartIdx).join(' - ')
+        : parts.slice(2).join(' - ');
     subDetail = parts.slice(1).join(' • ');
   } else if (prefix.toLowerCase().startsWith('compra no débito')) {
     operationType = prefix;
-    extractedCounterparty = parts[1] || prefix;
   } else if (prefix.toLowerCase().startsWith('transferência enviada pelo pix')) {
     operationType = 'Pix Enviado';
     // Handle case where name has "(Transferência enviada)" suffix without " - "
@@ -168,10 +181,26 @@ export function parseBankAccountRow(
     operationType = 'Reembolso Pix';
   }
 
-  const documentId = extractDocumentId(rawDescription);
+  // Clean up unclosed parentheses when Nubank formats "Nickname (Legal Name - CPF/CNPJ - Bank)"
+  if (extractedCounterparty.includes('(') && !extractedCounterparty.includes(')')) {
+    const parenIdx = extractedCounterparty.indexOf('(');
+    const beforeParen = extractedCounterparty.slice(0, parenIdx).trim();
+    const afterParen = extractedCounterparty.slice(parenIdx + 1).trim();
+    if (!beforeParen) {
+      extractedCounterparty = afterParen;
+    } else if (!afterParen || normalizeForMatch(beforeParen) === normalizeForMatch(afterParen)) {
+      extractedCounterparty = beforeParen;
+    } else {
+      extractedCounterparty = `${beforeParen} (${afterParen})`;
+    }
+  }
+
+  // Exclude bank routing metadata (CPF/CNPJ, bank institution name, agency, account number) from text matching
+  const cleanTargetText =
+    parts.length > 1 ? `${prefix} - ${extractedCounterparty}` : prefix;
 
   const match = matchGroupingRule(
-    rawDescription,
+    cleanTargetText,
     extractedCounterparty,
     rules,
     overrides,

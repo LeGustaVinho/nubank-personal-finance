@@ -4,6 +4,7 @@ import {
   parseBrCurrency,
   parseCsvLine,
   detectCsvSourceType,
+  parseBankAccountRow,
   loadAllTransactionsFromDisk,
 } from '../csvParser.ts';
 import {
@@ -65,6 +66,49 @@ describe('Nubank CSV Parser, Grouping & Intelligence Engine', () => {
     );
     expect(inferSemanticCategory('Posto Shell Pampulha', 'creditCard').category).toBe(
       'Transporte & Mobilidade'
+    );
+  });
+
+  it('prevents numeric/wildcard collisions with "99 App" and enforces word boundaries on short keywords', () => {
+    // Bank Pix with "99" in Account, Agency, CPF, or CNPJ must NEVER match "99 App"
+    const pixWith99InAccount = parseBankAccountRow(
+      {
+        Data: '15/08/2026',
+        Valor: '-120.00',
+        Identificador: 'tx-test-99-acc',
+        Descrição:
+          'Transferência enviada pelo Pix - Cliente Teste (CLIENTE TESTE - •••.998.111-•• - PAGSEGURO INTERNET IP S.A. (0290) Agência: 1399 Conta: 1052995-3)',
+      },
+      'test.csv',
+      DEFAULT_GROUPING_RULES,
+      {}
+    );
+    expect(pixWith99InAccount).not.toBeNull();
+    expect(pixWith99InAccount?.extractedCounterparty).toBe('Cliente Teste');
+    expect(pixWith99InAccount?.merchantGroup).toBe('Cliente Teste');
+    expect(pixWith99InAccount?.category).toBe('Transferências & Pessoas');
+
+    // Genuine 99 ride must still match "99 App"
+    const genuine99 = parseBankAccountRow(
+      {
+        Data: '15/08/2026',
+        Valor: '-24.90',
+        Identificador: 'tx-test-99-real',
+        Descrição: 'Compra no débito - 99 - NuPay',
+      },
+      'test.csv',
+      DEFAULT_GROUPING_RULES,
+      {}
+    );
+    expect(genuine99?.merchantGroup).toBe('99 App');
+    expect(genuine99?.category).toBe('Transporte & Mobilidade');
+
+    // Short semantic keywords ("tim", "pet", "mart") must not match substrings inside person names
+    expect(
+      inferSemanticCategory('Maria de Fatima Perpetuo', 'bankAccount', '•••.111.222-••').category
+    ).toBe('Transferências & Pessoas');
+    expect(inferSemanticCategory('Marthus Silva', 'creditCard').category).toBe(
+      'Compras & E-commerce'
     );
   });
 

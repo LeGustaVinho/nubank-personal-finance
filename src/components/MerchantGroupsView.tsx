@@ -450,9 +450,38 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
         .toLowerCase()
         .trim();
 
-    const cleanPatterns = parsedPatterns
-      .map((p) => normalize(p.replace(/\*$/g, '')))
-      .filter(Boolean);
+    const escapeRx = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const matchesCandidate = (candidates: string[], rawPattern: string) => {
+      const trimmed = rawPattern.trim();
+      if (!trimmed) return false;
+      const endsWithWildcard = trimmed.endsWith('*');
+      const stemRaw = endsWithWildcard ? trimmed.replace(/\*+$/g, '').trim() : trimmed;
+      const cleanPattern = normalize(stemRaw);
+      if (!cleanPattern) return false;
+      const isNumericOrShort = cleanPattern.length <= 4 || /^\d+$/.test(cleanPattern);
+
+      for (const cand of candidates) {
+        const normCand = normalize(cand || '');
+        if (!normCand) continue;
+        if (endsWithWildcard) {
+          const litStar = new RegExp(`(?:^|[^a-z0-9])${escapeRx(cleanPattern)}\\s*\\*`, 'i');
+          if (litStar.test(normCand)) return true;
+          if (!isNumericOrShort) {
+            const pref = new RegExp(`(?:^|[^a-z0-9])${escapeRx(cleanPattern)}`, 'i');
+            if (pref.test(normCand)) return true;
+          }
+          continue;
+        }
+        if (isNumericOrShort) {
+          const wb = new RegExp(`(?:^|[^a-z0-9])${escapeRx(cleanPattern)}(?:$|[^a-z0-9])`, 'i');
+          if (wb.test(normCand)) return true;
+        } else if (normCand.includes(cleanPattern)) {
+          return true;
+        }
+      }
+      return false;
+    };
 
     const matchedTxs: UnifiedTransaction[] = [];
     let totalAmount = 0;
@@ -466,16 +495,13 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
       ) {
         continue;
       }
-      const normRaw = normalize(tx.rawDescription || '');
-      const normCounterparty = normalize(tx.extractedCounterparty || '');
-      const normGroup = normalize(tx.merchantGroup || '');
+      const cleanTarget =
+        tx.source === 'bankAccount'
+          ? `${tx.operationType || ''} - ${tx.extractedCounterparty || ''}`
+          : tx.rawDescription || '';
+      const candidates = [cleanTarget, tx.extractedCounterparty || '', tx.merchantGroup || ''];
 
-      const hits = cleanPatterns.some(
-        (cp) =>
-          normRaw.includes(cp) ||
-          normCounterparty.includes(cp) ||
-          normGroup.includes(cp)
-      );
+      const hits = parsedPatterns.some((pat) => matchesCandidate(candidates, pat));
       if (hits) {
         matchedTxs.push(tx);
         totalAmount += Math.abs(tx.rawAmount);

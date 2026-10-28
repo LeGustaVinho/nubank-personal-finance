@@ -41,7 +41,7 @@ export const DEFAULT_GROUPING_RULES: GroupingRule[] = [
     id: 'rule-99',
     merchantGroup: '99 App',
     category: 'Transporte & Mobilidade',
-    patterns: ['99 - NuPay', '99 TECNOLOGIA LTDA', '99*'],
+    patterns: ['99 - NuPay', '99 TECNOLOGIA', '99*', '99 *', '99App', '99 Pop', '99 Taxi'],
     documentIds: ['18.033.552/0001-61'],
   },
 
@@ -465,6 +465,60 @@ export function normalizeForMatch(str: string): string {
     .trim();
 }
 
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Safely checks whether any candidate text matches a rule pattern.
+ * - Patterns ending in `*` (like `99*`, `Ifd*`) require either a literal `*` after the stem
+ *   at a word boundary, or (only if the stem is >= 4 non-numeric chars) a word-prefix match.
+ *   Short/numeric stems like `99*` NEVER match arbitrary numbers (`Raia3899`, `1399`, `998`).
+ * - Short patterns (`<= 4` chars) or purely numeric patterns require word boundaries on both sides.
+ */
+export function matchesRulePattern(candidates: string[], rawPattern: string): boolean {
+  const trimmed = rawPattern.trim();
+  if (!trimmed) return false;
+
+  const endsWithWildcard = trimmed.endsWith('*');
+  const stemRaw = endsWithWildcard ? trimmed.replace(/\*+$/g, '').trim() : trimmed;
+  const cleanPattern = normalizeForMatch(stemRaw);
+  if (!cleanPattern) return false;
+
+  const isNumericOrShort = cleanPattern.length <= 4 || /^\d+$/.test(cleanPattern);
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const normCand = normalizeForMatch(candidate);
+    if (!normCand) continue;
+
+    if (endsWithWildcard) {
+      // Check for literal asterisk prefix at token boundary (e.g. "99*Pop", "99 *NuPay", "Ifd*Rest")
+      const literalStarRegex = new RegExp(`(?:^|[^a-z0-9])${escapeRegex(cleanPattern)}\\s*\\*`, 'i');
+      if (literalStarRegex.test(normCand)) return true;
+
+      // Only allow wildcard without literal '*' if stem is an alphabetic word >= 4 chars
+      if (!isNumericOrShort) {
+        const prefixRegex = new RegExp(`(?:^|[^a-z0-9])${escapeRegex(cleanPattern)}`, 'i');
+        if (prefixRegex.test(normCand)) return true;
+      }
+      continue;
+    }
+
+    if (isNumericOrShort) {
+      const wordBoundaryRegex = new RegExp(
+        `(?:^|[^a-z0-9])${escapeRegex(cleanPattern)}(?:$|[^a-z0-9])`,
+        'i'
+      );
+      if (wordBoundaryRegex.test(normCand)) return true;
+    } else if (normCand.includes(cleanPattern)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * Extracts CPF (•••.XXX.XXX-••) or CNPJ (XX.XXX.XXX/XXXX-XX) from bank descriptions
  */
@@ -635,14 +689,35 @@ const SEMANTIC_SECTOR_DICTIONARY: Array<{
   },
 ];
 
-export function inferSemanticCategory(text: string, source: 'bankAccount' | 'creditCard'): {
+export function inferSemanticCategory(
+  text: string,
+  source: 'bankAccount' | 'creditCard',
+  documentId: string | null = null
+): {
   category: string;
   confidence: number;
 } {
+  // Bank account transfers with a masked individual CPF (•••.XXX.XXX-••) are person-to-person transfers
+  if (source === 'bankAccount' && documentId && /^[•*]{3}\.\d{3}\.\d{3}-[•*]{2}$/.test(documentId)) {
+    return {
+      category: 'Transferências & Pessoas',
+      confidence: 85,
+    };
+  }
+
   const norm = normalizeForMatch(text);
   for (const sector of SEMANTIC_SECTOR_DICTIONARY) {
     for (const kw of sector.keywords) {
-      if (norm.includes(normalizeForMatch(kw))) {
+      const cleanKw = normalizeForMatch(kw);
+      if (!cleanKw) continue;
+      const needsWordBoundary =
+        cleanKw.length <= 4 || kw.startsWith(' ') || kw.endsWith(' ') || /^\d+$/.test(cleanKw);
+      if (needsWordBoundary) {
+        const kwRegex = new RegExp(`(?:^|[^a-z0-9])${escapeRegex(cleanKw)}(?:$|[^a-z0-9])`, 'i');
+        if (kwRegex.test(norm)) {
+          return { category: sector.category, confidence: 84 };
+        }
+      } else if (norm.includes(cleanKw)) {
         return { category: sector.category, confidence: 84 };
       }
     }
@@ -680,9 +755,7 @@ export function matchGroupingRule(
     };
   }
 
-  const normTarget = normalizeForMatch(targetText);
-  const normCounterparty = normalizeForMatch(extractedCounterparty);
-  const normClean = normalizeForMatch(cleanName);
+  const candidates = [targetText, extractedCounterparty, cleanName];
   const customRules = rules.filter((r) => r.isCustom);
   const systemRules = rules.filter((r) => !r.isCustom);
 
@@ -705,13 +778,7 @@ export function matchGroupingRule(
 
   for (const rule of customRules) {
     for (const rawPattern of rule.patterns) {
-      if (!rawPattern.trim()) continue;
-      const cleanPattern = normalizeForMatch(rawPattern.replace(/\*$/g, ''));
-      if (
-        normTarget.includes(cleanPattern) ||
-        normCounterparty.includes(cleanPattern) ||
-        normClean.includes(cleanPattern)
-      ) {
+      if (matchesRulePattern(candidates, rawPattern)) {
         return {
           merchantGroup: rule.merchantGroup,
           category: rule.category,
@@ -762,11 +829,18 @@ export function matchGroupingRule(
   // 4. Learned Pattern by Normalized Token Key
   const tokenKey = buildNormalizedTokenKey(extractedCounterparty || targetText);
   if (tokenKey.length >= 3) {
-    const learnedToken = learnedPatterns.find(
-      (lp) =>
-        lp.keyType === 'token' &&
-        (lp.keyValue === tokenKey || tokenKey.includes(lp.keyValue))
-    );
+    const learnedToken = learnedPatterns.find((lp) => {
+      if (lp.keyType !== 'token') return false;
+      if (lp.keyValue === tokenKey) return true;
+      if (lp.keyValue.length >= 5) {
+        const tokenBoundaryRegex = new RegExp(
+          `(?:^|\\s)${escapeRegex(lp.keyValue)}(?:$|\\s)`,
+          'i'
+        );
+        return tokenBoundaryRegex.test(tokenKey);
+      }
+      return false;
+    });
     if (learnedToken) {
       return {
         merchantGroup: learnedToken.merchantGroup,
@@ -784,13 +858,7 @@ export function matchGroupingRule(
   // 5. System Grouping Rules
   for (const rule of systemRules) {
     for (const rawPattern of rule.patterns) {
-      if (!rawPattern.trim()) continue;
-      const cleanPattern = normalizeForMatch(rawPattern.replace(/\*$/g, ''));
-      if (
-        normTarget.includes(cleanPattern) ||
-        normCounterparty.includes(cleanPattern) ||
-        normClean.includes(cleanPattern)
-      ) {
+      if (matchesRulePattern(candidates, rawPattern)) {
         return {
           merchantGroup: rule.merchantGroup,
           category: rule.category,
@@ -805,8 +873,12 @@ export function matchGroupingRule(
     }
   }
 
-  // 5. Semantic AI Sector Classifier for brand-new merchants
-  const semantic = inferSemanticCategory(`${targetText} ${extractedCounterparty}`, source);
+  // 6. Semantic AI Sector Classifier for brand-new merchants
+  const semantic = inferSemanticCategory(
+    `${targetText} ${extractedCounterparty}`,
+    source,
+    documentId
+  );
   return {
     merchantGroup: formatTitleCase(gateway ? cleanName : extractedCounterparty),
     category: semantic.category,
