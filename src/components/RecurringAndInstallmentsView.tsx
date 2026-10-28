@@ -924,8 +924,8 @@ export const RecurringAndInstallmentsView: React.FC<
                       </button>
                     </div>
 
-                    <div className="overflow-x-auto pb-1.5 pt-1">
-                      <div className="flex items-end gap-2 min-w-max">
+                    <div className="overflow-x-auto pb-1 pt-0.5">
+                      <div className="flex items-end gap-1 w-full">
                         {allMonths.map((m) => {
                           const rawVal = srv.byMonth.get(m) || 0;
                           const val = Math.max(0, rawVal);
@@ -941,26 +941,28 @@ export const RecurringAndInstallmentsView: React.FC<
                           return (
                             <div
                               key={m}
-                              className="w-14 shrink-0 flex flex-col items-center group"
+                              className="min-w-[38px] flex-1 shrink-0 flex flex-col items-center group"
                               title={`${formatMonthShort(m)}: ${
                                 val > 0 ? formatBRL(val) : 'Sem cobrança'
                               }`}
                             >
                               {/* Compact Value Label above bar */}
                               <span
-                                className={`text-[9px] font-mono mb-1 truncate w-full text-center ${
+                                className={`text-[8.5px] font-mono mb-0.5 truncate w-full text-center leading-tight ${
                                   val > 0
                                     ? 'text-slate-200 font-semibold'
                                     : 'text-slate-600'
                                 }`}
                               >
-                                {val > 0 ? formatCompactBRL(val) : '—'}
+                                {val > 0
+                                  ? formatCompactBRL(val).replace('R$', '').trim()
+                                  : '—'}
                               </span>
 
-                              {/* Isolated Wide Bar Track */}
-                              <div className="w-10 h-14 bg-slate-900/80 rounded-lg p-1 flex items-end overflow-hidden border border-slate-800/70">
+                              {/* Isolated Bar Track with tight gap */}
+                              <div className="w-full h-14 bg-slate-900/80 rounded-md p-0.5 flex items-end overflow-hidden border border-slate-800/70">
                                 <div
-                                  className={`w-full rounded transition-all ${
+                                  className={`w-full rounded-sm transition-all ${
                                     val > 0
                                       ? srv.costType === 'digital_subscription'
                                         ? 'bg-violet-500 group-hover:bg-violet-400'
@@ -974,7 +976,7 @@ export const RecurringAndInstallmentsView: React.FC<
                               </div>
 
                               {/* Non-overlapping Month/Year Label */}
-                              <span className="text-[10px] font-mono text-slate-400 mt-1.5 truncate w-full text-center capitalize">
+                              <span className="text-[9px] font-mono text-slate-400 mt-1 truncate w-full text-center capitalize leading-tight">
                                 {shortMonthLabel}
                               </span>
                             </div>
