@@ -258,10 +258,16 @@ export const DEFAULT_GROUPING_RULES: GroupingRule[] = [
     documentIds: ['13.382.906/0001-60'],
   },
   {
-    id: 'rule-cloud-privacy',
-    merchantGroup: 'MEGA & Proton (Cloud / Privacidade)',
+    id: 'rule-mega',
+    merchantGroup: 'MEGA (Cloud Storage)',
     category: 'Assinaturas Digitais & IA',
-    patterns: ['Mega Limited', 'Paypal *Proton'],
+    patterns: ['Mega Limited'],
+  },
+  {
+    id: 'rule-proton',
+    merchantGroup: 'Proton (Mail / VPN / Pass)',
+    category: 'Assinaturas Digitais & IA',
+    patterns: ['Paypal *Proton', 'Proton'],
   },
   {
     id: 'rule-discord',
