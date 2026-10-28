@@ -450,9 +450,7 @@ export const App: React.FC = () => {
 
           {/* Global Period Selector & Actions */}
           <div className="flex flex-wrap items-center gap-2.5">
-            {activeTab !== 'invoices' &&
-              activeTab !== 'bank_statements' &&
-              activeTab !== 'recurring' && (
+            {activeTab !== 'invoices' && activeTab !== 'bank_statements' && (
               <div className="flex flex-wrap items-center gap-2 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5">
                 <div className="flex items-center gap-1.5">
                   <Calendar className="w-3.5 h-3.5 text-violet-400 shrink-0" />
@@ -717,7 +715,7 @@ export const App: React.FC = () => {
 
             {activeTab === 'recurring' && (
               <RecurringAndInstallmentsView
-                allTransactions={transactions}
+                allTransactions={filteredTransactions}
                 costTypeOverrides={costTypeOverrides}
                 onUpdateCostType={handleUpdateCostType}
               />

@@ -117,20 +117,22 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
     }
   }, [focusedGroup]);
 
-  // All timeline months across the full dataset so monthly charts show Jan..Nov/Dec consistently
+  // All timeline months in the selected period so monthly charts reflect the active period selector
   const allTimelineMonths = useMemo(() => {
     const set = new Set<string>();
-    for (const tx of fullHistoryTransactions) {
+    const sourceList = transactions.length > 0 ? transactions : fullHistoryTransactions;
+    for (const tx of sourceList) {
       if (tx.competenceMonth) set.add(tx.competenceMonth);
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [fullHistoryTransactions]);
+  }, [transactions, fullHistoryTransactions]);
 
-  // Helper to build the full month-by-month chart series for any merchantGroup using fullHistoryTransactions
+  // Helper to build the month-by-month chart series for any merchantGroup using the filtered period transactions
   const buildGroupMonthlySeries = useMemo(() => {
     const byGroup = new Map<string, Map<string, MonthlyGroupPoint>>();
+    const sourceList = transactions.length > 0 ? transactions : fullHistoryTransactions;
 
-    for (const tx of fullHistoryTransactions) {
+    for (const tx of sourceList) {
       if (
         tx.flowKind === 'cc_payment' ||
         tx.flowKind === 'internal_transfer' ||
@@ -199,7 +201,7 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
         Total: Math.max(0, Math.round(pt.Total * 100) / 100),
       }));
     };
-  }, [fullHistoryTransactions, allTimelineMonths]);
+  }, [transactions, fullHistoryTransactions, allTimelineMonths]);
 
   const groups = useMemo(() => {
     const map = new Map<string, AggregatedMerchantGroup>();

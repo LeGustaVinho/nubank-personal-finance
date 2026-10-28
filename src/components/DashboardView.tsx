@@ -83,10 +83,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return 0;
   };
 
-  // All distinct expense categories across all transactions
+  // All distinct expense categories in the selected period (falling back to allTransactions if none in period)
   const allExpenseCategories = useMemo(() => {
     const map = new Map<string, number>();
-    for (const tx of allTransactions) {
+    const sourceList = transactions.length > 0 ? transactions : allTransactions;
+    for (const tx of sourceList) {
       const exp = getEffectiveExpense(tx);
       if (exp !== 0) {
         map.set(tx.category, (map.get(tx.category) || 0) + exp);
@@ -96,7 +97,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .filter(([, total]) => total > 0)
       .sort((a, b) => b[1] - a[1])
       .map(([cat]) => cat);
-  }, [allTransactions, includeIof, netRefunds]);
+  }, [transactions, allTransactions, includeIof, netRefunds]);
 
   // Selected category for the Monthly Category Chart (defaults to top category)
   const [selectedCategoryChart, setSelectedCategoryChart] = useState<string>('');
@@ -181,7 +182,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       }
     >();
 
-    for (const tx of allTransactions) {
+    for (const tx of transactions) {
       const m =
         accountingRegime === 'invoice' && tx.source === 'creditCard' && tx.invoiceMonth
           ? tx.invoiceMonth
@@ -241,7 +242,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           spentMoreThanEarned: TotalDespesas > Receitas,
         };
       });
-  }, [allTransactions, includeIof, netRefunds, accountingRegime]);
+  }, [transactions, includeIof, netRefunds, accountingRegime]);
 
   // Summary of months in surplus vs deficit (only considering months where bank statement is present)
   const unifiedBalanceOverview = useMemo(() => {
@@ -303,10 +304,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       }));
   }, [transactions, includeIof, netRefunds]);
 
-  // Monthly Evolution for the SELECTED Category across all months
+  // Monthly Evolution for the SELECTED Category across the selected period
   const selectedCategoryMonthlyAnalysis = useMemo(() => {
     const allMonthsSet = new Set<string>();
-    for (const tx of allTransactions) {
+    for (const tx of transactions) {
       if (tx.competenceMonth) allMonthsSet.add(tx.competenceMonth);
     }
     const sortedMonths = Array.from(allMonthsSet).sort((a, b) => a.localeCompare(b));
@@ -342,7 +343,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     >();
     const categoryTxs: UnifiedTransaction[] = [];
 
-    for (const tx of allTransactions) {
+    for (const tx of transactions) {
       if (tx.category !== effectiveSelectedCategory) continue;
       const exp = getEffectiveExpense(tx);
       if (exp === 0) continue;
@@ -404,7 +405,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         (a, b) => b.date.localeCompare(a.date) || Math.abs(b.rawAmount) - Math.abs(a.rawAmount)
       ),
     };
-  }, [allTransactions, effectiveSelectedCategory, includeIof, netRefunds]);
+  }, [transactions, effectiveSelectedCategory, includeIof, netRefunds]);
 
   // Top Merchant Groups in current period
   const topMerchantGroups = useMemo(() => {
@@ -1020,7 +1021,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           {/* 4 Mini KPIs for the Selected Category */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800">
-              <span className="text-[11px] text-slate-400 block">Total no Ano</span>
+              <span className="text-[11px] text-slate-400 block">Total no Período</span>
               <span className="text-sm font-bold text-white mt-0.5 block">
                 {formatBRL(selectedCategoryMonthlyAnalysis.grandTotal)}
               </span>
