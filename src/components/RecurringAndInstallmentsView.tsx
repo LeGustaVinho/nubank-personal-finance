@@ -73,6 +73,9 @@ const DIGITAL_SUBSCRIPTION_GROUPS = new Set([
   'Discord Nitro',
   'Streaming (Netflix, Crunchyroll, WeTV, Prime Video)',
   'CCP Games (EVE Online)',
+  'Blizzard Entertainment',
+  'Nexus Mods',
+  'Nitrado (Game Servers)',
   'Nitrado Game Servers',
   'Google Superlive & Serviços Digitais',
 ]);
