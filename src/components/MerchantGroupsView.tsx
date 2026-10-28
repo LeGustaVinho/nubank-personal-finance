@@ -25,6 +25,10 @@ import {
   CheckSquare,
   Square,
   BarChart3,
+  CheckCircle2,
+  AlertCircle,
+  Sparkles,
+  Loader2,
 } from 'lucide-react';
 import { UnifiedTransaction, GroupingRule } from '../../server/types';
 import {
@@ -108,6 +112,15 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
     merchantGroup: string;
     category: string;
     patternsText: string;
+    sourceGroupName?: string;
+  } | null>(null);
+  const [isSavingRule, setIsSavingRule] = useState(false);
+  const [ruleModalError, setRuleModalError] = useState<string | null>(null);
+  const [ruleSuccessBanner, setRuleSuccessBanner] = useState<{
+    merchantGroup: string;
+    category: string;
+    matchedCount: number;
+    totalAmount: number;
   } | null>(null);
 
   useEffect(() => {
@@ -366,15 +379,18 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
       }
     }
 
+    setRuleModalError(null);
     setEditingRule({
       merchantGroup: first.merchantGroup,
       category: first.category,
       patternsText: Array.from(allPatterns).join(', '),
+      sourceGroupName: selectedGroups.map((g) => g.merchantGroup).join(' + '),
     });
   };
 
   const openEditGroupRule = (group: AggregatedMerchantGroup, e: React.MouseEvent) => {
     e.stopPropagation();
+    setRuleModalError(null);
     const existingRule = rules.find((r) => r.id === group.matchedRuleId);
     if (existingRule) {
       setEditingRule({
@@ -382,41 +398,189 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
         merchantGroup: existingRule.merchantGroup,
         category: existingRule.category,
         patternsText: existingRule.patterns.join(', '),
+        sourceGroupName: group.merchantGroup,
       });
     } else {
-      const patterns = new Set<string>([group.merchantGroup]);
+      const patterns = new Set<string>();
       for (const tx of group.items) {
-        patterns.add(tx.extractedCounterparty);
+        if (tx.extractedCounterparty) patterns.add(tx.extractedCounterparty);
+        else if (tx.rawDescription) patterns.add(tx.rawDescription);
+      }
+      if (patterns.size === 0) {
+        patterns.add(group.merchantGroup);
       }
       setEditingRule({
         merchantGroup: group.merchantGroup,
         category: group.category,
         patternsText: Array.from(patterns).join(', '),
+        sourceGroupName: group.merchantGroup,
       });
     }
   };
 
+  // Live preview of transactions matched by the patterns currently typed in the modal
+  const ruleLivePreview = useMemo(() => {
+    if (!editingRule) {
+      return {
+        parsedPatterns: [] as string[],
+        matchedTxs: [] as UnifiedTransaction[],
+        totalAmount: 0,
+        previousGroups: [] as string[],
+      };
+    }
+
+    const parsedPatterns = editingRule.patternsText
+      .split(',')
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+
+    if (parsedPatterns.length === 0) {
+      return {
+        parsedPatterns: [],
+        matchedTxs: [],
+        totalAmount: 0,
+        previousGroups: [],
+      };
+    }
+
+    const normalize = (s: string) =>
+      s
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+
+    const cleanPatterns = parsedPatterns
+      .map((p) => normalize(p.replace(/\*$/g, '')))
+      .filter(Boolean);
+
+    const matchedTxs: UnifiedTransaction[] = [];
+    let totalAmount = 0;
+    const prevGroupSet = new Set<string>();
+
+    for (const tx of fullHistoryTransactions) {
+      if (
+        tx.flowKind === 'cc_payment' ||
+        tx.flowKind === 'internal_transfer' ||
+        tx.flowKind === 'investment'
+      ) {
+        continue;
+      }
+      const normRaw = normalize(tx.rawDescription || '');
+      const normCounterparty = normalize(tx.extractedCounterparty || '');
+      const normGroup = normalize(tx.merchantGroup || '');
+
+      const hits = cleanPatterns.some(
+        (cp) =>
+          normRaw.includes(cp) ||
+          normCounterparty.includes(cp) ||
+          normGroup.includes(cp)
+      );
+      if (hits) {
+        matchedTxs.push(tx);
+        totalAmount += Math.abs(tx.rawAmount);
+        prevGroupSet.add(tx.merchantGroup);
+      }
+    }
+
+    return {
+      parsedPatterns,
+      matchedTxs,
+      totalAmount: Math.round(totalAmount * 100) / 100,
+      previousGroups: Array.from(prevGroupSet),
+    };
+  }, [editingRule, fullHistoryTransactions]);
+
   const handleSaveRuleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingRule) return;
+    setRuleModalError(null);
+
+    const cleanMerchantGroup = editingRule.merchantGroup.trim();
     const patterns = editingRule.patternsText
       .split(',')
       .map((p) => p.trim())
       .filter(Boolean);
-    if (!editingRule.merchantGroup.trim() || patterns.length === 0) return;
 
-    await onSaveRule({
-      id: editingRule.id,
-      merchantGroup: editingRule.merchantGroup.trim(),
-      category: editingRule.category,
-      patterns,
-    });
-    setEditingRule(null);
-    setSelectedForMerge(new Set());
+    if (!cleanMerchantGroup) {
+      setRuleModalError(
+        'Informe o Nome Canônico do Grupo / Estabelecimento (ex: Privacy).'
+      );
+      return;
+    }
+
+    if (patterns.length === 0) {
+      setRuleModalError(
+        'Informe pelo menos 1 termo ou prefixo de busca (ex: Orange Sea, Zp *Io Privacy).'
+      );
+      return;
+    }
+
+    const existingRuleForSameName = rules.find(
+      (r) =>
+        r.isCustom &&
+        r.merchantGroup.toLowerCase() === cleanMerchantGroup.toLowerCase()
+    );
+
+    setIsSavingRule(true);
+    try {
+      await onSaveRule({
+        id: editingRule.id || existingRuleForSameName?.id,
+        merchantGroup: cleanMerchantGroup,
+        category: editingRule.category,
+        patterns,
+      });
+
+      setRuleSuccessBanner({
+        merchantGroup: cleanMerchantGroup,
+        category: editingRule.category,
+        matchedCount: ruleLivePreview.matchedTxs.length,
+        totalAmount: ruleLivePreview.totalAmount,
+      });
+      setExpandedGroup(cleanMerchantGroup);
+      setEditingRule(null);
+      setSelectedForMerge(new Set());
+    } catch (err: any) {
+      setRuleModalError(
+        err?.message || 'Não foi possível salvar a regra de agrupamento.'
+      );
+    } finally {
+      setIsSavingRule(false);
+    }
   };
 
   return (
     <div className="space-y-5">
+      {/* Rule Saved Confirmation Banner */}
+      {ruleSuccessBanner && (
+        <div className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 flex flex-wrap items-center justify-between gap-3 text-xs text-emerald-200 shadow-lg">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            <div>
+              <span className="font-bold text-white">
+                Grupo salvo e reagrupado com sucesso:{' '}
+                <span className="text-emerald-300">
+                  {ruleSuccessBanner.merchantGroup}
+                </span>
+              </span>
+              <span className="ml-2 px-2 py-0.5 rounded-full bg-emerald-500/20 text-[11px] font-semibold text-emerald-200">
+                {ruleSuccessBanner.category}
+              </span>
+              <p className="text-[11px] text-slate-300 mt-0.5">
+                {ruleSuccessBanner.matchedCount} lançamentos unificados (total de{' '}
+                <strong>{formatBRL(ruleSuccessBanner.totalAmount)}</strong>). Padrões anteriores conflitantes foram atualizados automaticamente.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setRuleSuccessBanner(null)}
+            className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-300 text-xs cursor-pointer"
+          >
+            Fechar aviso
+          </button>
+        </div>
+      )}
+
       {/* Header & Controls */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg">
         <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
@@ -769,14 +933,38 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
 
       {/* Create / Edit Rule Modal */}
       {editingRule && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
           <form
             onSubmit={handleSaveRuleSubmit}
-            className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4"
+            className="bg-slate-900 border border-slate-700 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto"
           >
-            <h3 className="text-base font-bold text-white">
-              {editingRule.id ? 'Editar Regra de Agrupamento' : 'Criar / Unir Grupo de Compras'}
-            </h3>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-white">
+                  {editingRule.id
+                    ? 'Editar Regra de Agrupamento'
+                    : 'Criar / Unir Grupo de Compras'}
+                </h3>
+                {editingRule.sourceGroupName && (
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Configurando a partir de:{' '}
+                    <strong className="text-violet-300">
+                      {editingRule.sourceGroupName}
+                    </strong>
+                  </p>
+                )}
+              </div>
+              <span className="px-2.5 py-1 rounded-full bg-violet-500/15 border border-violet-500/30 text-[11px] font-semibold text-violet-300">
+                Prioridade Máxima (99%)
+              </span>
+            </div>
+
+            {ruleModalError && (
+              <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 flex items-center gap-2 text-xs text-rose-200">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{ruleModalError}</span>
+              </div>
+            )}
 
             <div>
               <label className="block text-xs text-slate-300 mb-1 font-medium">
@@ -786,12 +974,28 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
                 type="text"
                 required
                 value={editingRule.merchantGroup}
-                onChange={(e) =>
-                  setEditingRule({ ...editingRule, merchantGroup: e.target.value })
-                }
-                placeholder="Ex: Uber, iFood, Farmácias, Padaria..."
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                onChange={(e) => {
+                  setRuleModalError(null);
+                  setEditingRule({ ...editingRule, merchantGroup: e.target.value });
+                }}
+                placeholder="Ex: Privacy, Uber, iFood, Farmácias..."
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 focus:border-violet-500 focus:outline-none rounded-xl text-xs text-white font-semibold"
               />
+              {rules.some(
+                (r) =>
+                  r.isCustom &&
+                  r.id !== editingRule.id &&
+                  r.merchantGroup.toLowerCase() ===
+                    editingRule.merchantGroup.trim().toLowerCase()
+              ) && (
+                <p className="text-[11px] text-sky-300 mt-1 flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    Já existe o grupo personalizado{' '}
+                    <strong>"{editingRule.merchantGroup.trim()}"</strong> — os termos abaixo serão mesclados nele automaticamente!
+                  </span>
+                </p>
+              )}
             </div>
 
             <div>
@@ -803,7 +1007,7 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
                 onChange={(e) =>
                   setEditingRule({ ...editingRule, category: e.target.value })
                 }
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 focus:border-violet-500 focus:outline-none rounded-xl text-xs text-white font-medium"
               >
                 {categories.map((cat) => (
                   <option key={cat} value={cat}>
@@ -814,38 +1018,139 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs text-slate-300 mb-1 font-medium">
-                Termos ou Prefixos que pertencem a este grupo (separados por vírgula)
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs text-slate-300 font-medium">
+                  Termos ou Prefixos que pertencem a este grupo (separados por vírgula)
+                </label>
+                <span className="text-[11px] text-violet-300 font-mono">
+                  {ruleLivePreview.parsedPatterns.length}{' '}
+                  {ruleLivePreview.parsedPatterns.length === 1 ? 'termo' : 'termos'}
+                </span>
+              </div>
               <textarea
                 rows={3}
                 required
                 value={editingRule.patternsText}
-                onChange={(e) =>
-                  setEditingRule({ ...editingRule, patternsText: e.target.value })
-                }
-                placeholder="Ex: Dl*Uberrides, Uber *Trip, Uber*"
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                onChange={(e) => {
+                  setRuleModalError(null);
+                  setEditingRule({ ...editingRule, patternsText: e.target.value });
+                }}
+                placeholder="Ex: Orange Sea, Zp *Io Privacy, Dl*Uberrides"
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 focus:border-violet-500 focus:outline-none rounded-xl text-xs text-white font-mono"
               />
-              <p className="text-[11px] text-slate-400 mt-1">
-                Qualquer transação futura ou passada cujo título ou contraparte contenha um destes
-                termos será automaticamente agrupada aqui.
-              </p>
+              {ruleLivePreview.parsedPatterns.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {ruleLivePreview.parsedPatterns.map((pat, i) => (
+                    <span
+                      key={`${pat}-${i}`}
+                      className="px-2 py-0.5 rounded-md bg-violet-500/15 border border-violet-500/30 text-[11px] font-mono text-violet-200"
+                    >
+                      {pat}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Live Impact Preview Box */}
+            <div
+              className={`p-3.5 rounded-xl border text-xs space-y-2 ${
+                ruleLivePreview.matchedTxs.length > 0
+                  ? 'bg-emerald-950/20 border-emerald-500/40'
+                  : 'bg-amber-950/20 border-amber-500/40'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold text-white flex items-center gap-1.5">
+                  {ruleLivePreview.matchedTxs.length > 0 ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                  )}
+                  <span>
+                    Prévia de Impacto:{' '}
+                    {ruleLivePreview.matchedTxs.length}{' '}
+                    {ruleLivePreview.matchedTxs.length === 1
+                      ? 'transação encontrada'
+                      : 'transações encontradas'}
+                  </span>
+                </span>
+                {ruleLivePreview.matchedTxs.length > 0 && (
+                  <span className="font-mono font-bold text-emerald-300">
+                    Total: {formatBRL(ruleLivePreview.totalAmount)}
+                  </span>
+                )}
+              </div>
+
+              {ruleLivePreview.matchedTxs.length > 0 ? (
+                <>
+                  {ruleLivePreview.previousGroups.length > 0 && (
+                    <div className="text-[11px] text-slate-300">
+                      Grupos atuais que serão unificados em{' '}
+                      <strong className="text-white">
+                        {editingRule.merchantGroup.trim() || '...'}
+                      </strong>{' '}
+                      ({editingRule.category}):{' '}
+                      <span className="text-emerald-300 font-medium">
+                        {ruleLivePreview.previousGroups.join(' • ')}
+                      </span>
+                    </div>
+                  )}
+                  <div className="max-h-28 overflow-y-auto divide-y divide-slate-800/60 bg-slate-950/70 rounded-lg p-2 font-mono text-[11px]">
+                    {ruleLivePreview.matchedTxs.slice(0, 8).map((tx) => (
+                      <div
+                        key={tx.id}
+                        className="py-1 flex items-center justify-between gap-2 text-slate-300"
+                      >
+                        <span className="truncate">
+                          {formatDateBR(tx.date)} • {tx.rawDescription}
+                        </span>
+                        <span className="text-slate-200 shrink-0">
+                          {formatBRL(Math.abs(tx.rawAmount))}
+                        </span>
+                      </div>
+                    ))}
+                    {ruleLivePreview.matchedTxs.length > 8 && (
+                      <div className="pt-1 text-center text-[10px] text-slate-400">
+                        + {ruleLivePreview.matchedTxs.length - 8} outros lançamentos...
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <p className="text-[11px] text-amber-200">
+                  Nenhuma transação atual contém esses termos. A regra ainda será salva para capturar lançamentos futuros, mas verifique a grafia se quiser agrupar transações existentes.
+                </p>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setEditingRule(null)}
+                disabled={isSavingRule}
+                onClick={() => {
+                  setRuleModalError(null);
+                  setEditingRule(null);
+                }}
                 className="px-4 py-2 rounded-xl bg-slate-800 text-xs text-slate-300 hover:bg-slate-700 cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-xs font-semibold text-white cursor-pointer"
+                disabled={
+                  isSavingRule ||
+                  !editingRule.merchantGroup.trim() ||
+                  ruleLivePreview.parsedPatterns.length === 0
+                }
+                className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-xs font-semibold text-white flex items-center gap-1.5 cursor-pointer"
               >
-                Salvar Regra e Reagrupar
+                {isSavingRule && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>
+                  {isSavingRule
+                    ? 'Salvando e Reagrupando...'
+                    : `Salvar Regra e Reagrupar (${ruleLivePreview.matchedTxs.length})`}
+                </span>
               </button>
             </div>
           </form>

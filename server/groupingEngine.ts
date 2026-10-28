@@ -666,7 +666,7 @@ export function matchGroupingRule(
   const { gateway, cleanName, subDetail } = extractGatewayAndCleanName(targetText);
   const override = overrides[txId];
 
-  // 1. Explicit Manual Override on this specific transaction ID
+  // 1. Explicit Manual Override on this specific transaction ID (100% confidence)
   if (override && (override.merchantGroup || override.category)) {
     return {
       merchantGroup: override.merchantGroup || formatTitleCase(cleanName),
@@ -680,7 +680,53 @@ export function matchGroupingRule(
     };
   }
 
-  // 2. Learned Pattern by Document ID (CPF/CNPJ) - 99% confidence
+  const normTarget = normalizeForMatch(targetText);
+  const normCounterparty = normalizeForMatch(extractedCounterparty);
+  const normClean = normalizeForMatch(cleanName);
+  const customRules = rules.filter((r) => r.isCustom);
+  const systemRules = rules.filter((r) => !r.isCustom);
+
+  // 2. Explicit Custom Rules created/edited by the user (99% confidence - beats AI learned patterns)
+  if (documentId) {
+    const customRuleByDoc = customRules.find((r) => r.documentIds?.includes(documentId));
+    if (customRuleByDoc) {
+      return {
+        merchantGroup: customRuleByDoc.merchantGroup,
+        category: customRuleByDoc.category,
+        matchedRuleId: customRuleByDoc.id,
+        forcedFlowKind: customRuleByDoc.forceFlowKind,
+        subDetail,
+        classificationSource: 'custom-rule',
+        confidence: 99,
+        gateway,
+      };
+    }
+  }
+
+  for (const rule of customRules) {
+    for (const rawPattern of rule.patterns) {
+      if (!rawPattern.trim()) continue;
+      const cleanPattern = normalizeForMatch(rawPattern.replace(/\*$/g, ''));
+      if (
+        normTarget.includes(cleanPattern) ||
+        normCounterparty.includes(cleanPattern) ||
+        normClean.includes(cleanPattern)
+      ) {
+        return {
+          merchantGroup: rule.merchantGroup,
+          category: rule.category,
+          matchedRuleId: rule.id,
+          forcedFlowKind: rule.forceFlowKind,
+          subDetail,
+          classificationSource: 'custom-rule',
+          confidence: 99,
+          gateway,
+        };
+      }
+    }
+  }
+
+  // 3. Learned Pattern by Document ID (CPF/CNPJ) - 98% confidence
   if (documentId) {
     const learnedDoc = learnedPatterns.find(
       (lp) => lp.keyType === 'document' && lp.keyValue === documentId
@@ -693,28 +739,27 @@ export function matchGroupingRule(
         forcedFlowKind: learnedDoc.flowKind,
         subDetail,
         classificationSource: 'learned-document',
-        confidence: 99,
+        confidence: 98,
         gateway,
       };
     }
 
-    // Also check if any rule has this documentId
-    const ruleByDoc = rules.find((r) => r.documentIds?.includes(documentId));
-    if (ruleByDoc) {
+    const systemRuleByDoc = systemRules.find((r) => r.documentIds?.includes(documentId));
+    if (systemRuleByDoc) {
       return {
-        merchantGroup: ruleByDoc.merchantGroup,
-        category: ruleByDoc.category,
-        matchedRuleId: ruleByDoc.id,
-        forcedFlowKind: ruleByDoc.forceFlowKind,
+        merchantGroup: systemRuleByDoc.merchantGroup,
+        category: systemRuleByDoc.category,
+        matchedRuleId: systemRuleByDoc.id,
+        forcedFlowKind: systemRuleByDoc.forceFlowKind,
         subDetail,
-        classificationSource: ruleByDoc.isCustom ? 'custom-rule' : 'system-rule',
-        confidence: 99,
+        classificationSource: 'system-rule',
+        confidence: 97,
         gateway,
       };
     }
   }
 
-  // 3. Learned Pattern by Normalized Token Key
+  // 4. Learned Pattern by Normalized Token Key
   const tokenKey = buildNormalizedTokenKey(extractedCounterparty || targetText);
   if (tokenKey.length >= 3) {
     const learnedToken = learnedPatterns.find(
@@ -736,17 +781,8 @@ export function matchGroupingRule(
     }
   }
 
-  // 4. Custom & System Grouping Rules
-  const normTarget = normalizeForMatch(targetText);
-  const normCounterparty = normalizeForMatch(extractedCounterparty);
-  const normClean = normalizeForMatch(cleanName);
-
-  const orderedRules = [
-    ...rules.filter((r) => r.isCustom),
-    ...rules.filter((r) => !r.isCustom),
-  ];
-
-  for (const rule of orderedRules) {
+  // 5. System Grouping Rules
+  for (const rule of systemRules) {
     for (const rawPattern of rule.patterns) {
       if (!rawPattern.trim()) continue;
       const cleanPattern = normalizeForMatch(rawPattern.replace(/\*$/g, ''));
@@ -761,7 +797,7 @@ export function matchGroupingRule(
           matchedRuleId: rule.id,
           forcedFlowKind: rule.forceFlowKind,
           subDetail,
-          classificationSource: rule.isCustom ? 'custom-rule' : 'system-rule',
+          classificationSource: 'system-rule',
           confidence: 95,
           gateway,
         };

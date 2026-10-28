@@ -231,9 +231,11 @@ export const App: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(rule),
     });
-    if (res.ok) {
-      applyServerState(await res.json());
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Erro ao salvar regra de agrupamento');
     }
+    applyServerState(data);
   };
 
   const handleDeleteRule = async (ruleId: string) => {

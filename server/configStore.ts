@@ -8,7 +8,11 @@ import {
   FlowKind,
   CostTypeOverrideValue,
 } from './types.ts';
-import { DEFAULT_GROUPING_RULES, buildNormalizedTokenKey } from './groupingEngine.ts';
+import {
+  DEFAULT_GROUPING_RULES,
+  buildNormalizedTokenKey,
+  normalizeForMatch,
+} from './groupingEngine.ts';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'user-config.json');
@@ -82,12 +86,27 @@ export function saveUserConfig(config: UserConfigStore): void {
 
 export function upsertRule(rule: GroupingRule): UserConfigStore {
   const config = loadUserConfig();
-  const idx = config.rules.findIndex((r) => r.id === rule.id);
+  const normGroup = normalizeForMatch(rule.merchantGroup);
+  const idxById = config.rules.findIndex((r) => r.id === rule.id);
+  const idxByCustomGroup = config.rules.findIndex(
+    (r) => r.isCustom && normalizeForMatch(r.merchantGroup) === normGroup
+  );
+  const idx = idxById >= 0 ? idxById : idxByCustomGroup;
   const now = new Date().toISOString();
+
   if (idx >= 0) {
+    const mergedPatterns = Array.from(
+      new Set([...(config.rules[idx].patterns || []), ...(rule.patterns || [])])
+    );
+    const mergedDocs = Array.from(
+      new Set([...(config.rules[idx].documentIds || []), ...(rule.documentIds || [])])
+    );
     config.rules[idx] = {
       ...config.rules[idx],
       ...rule,
+      id: config.rules[idx].id,
+      patterns: mergedPatterns,
+      documentIds: mergedDocs.length > 0 ? mergedDocs : undefined,
       isCustom: true,
       learnedCount: (config.rules[idx].learnedCount || 1) + 1,
       updatedAt: now,
@@ -100,6 +119,35 @@ export function upsertRule(rule: GroupingRule): UserConfigStore {
       updatedAt: now,
     });
   }
+
+  // Also synchronize any conflicting learnedPatterns that match the rule's patterns or documentIds
+  const normRulePatterns = (rule.patterns || [])
+    .map((p) => normalizeForMatch(p.replace(/\*$/g, '')))
+    .filter(Boolean);
+  const ruleDocs = new Set(rule.documentIds || []);
+
+  for (const lp of config.learnedPatterns) {
+    if (lp.keyType === 'document' && ruleDocs.has(lp.keyValue)) {
+      lp.merchantGroup = rule.merchantGroup;
+      lp.category = rule.category;
+      if (rule.forceFlowKind) lp.flowKind = rule.forceFlowKind;
+    } else if (lp.keyType === 'token') {
+      const normKey = normalizeForMatch(lp.keyValue);
+      const normSample = normalizeForMatch(lp.learnedFromSample || '');
+      const matchesPattern = normRulePatterns.some(
+        (pat) =>
+          normKey.includes(pat) ||
+          pat.includes(normKey) ||
+          normSample.includes(pat)
+      );
+      if (matchesPattern) {
+        lp.merchantGroup = rule.merchantGroup;
+        lp.category = rule.category;
+        if (rule.forceFlowKind) lp.flowKind = rule.forceFlowKind;
+      }
+    }
+  }
+
   saveUserConfig(config);
   return config;
 }
