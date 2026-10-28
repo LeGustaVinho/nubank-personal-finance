@@ -9,14 +9,20 @@ import {
   CreditCard,
   Landmark,
   Bot,
+  Clock,
 } from 'lucide-react';
-import { CsvFileSummary } from '../../server/types';
+import { CsvFileSummary, SourceType } from '../../server/types';
 import { formatBRL, formatDateBR } from '../utils/formatters';
 
 interface CsvManagerModalProps {
   isOpen: boolean;
   onClose: () => void;
   files: CsvFileSummary[];
+  onTogglePartialFile?: (
+    source: SourceType,
+    fileName: string,
+    isPartial: boolean
+  ) => Promise<void>;
   onUploadFiles: (
     files: Array<{ fileName: string; content: string }>,
     autoAiClassify: boolean
@@ -39,6 +45,7 @@ export const CsvManagerModal: React.FC<CsvManagerModalProps> = ({
   isOpen,
   onClose,
   files,
+  onTogglePartialFile,
   onUploadFiles,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
@@ -219,23 +226,58 @@ export const CsvManagerModal: React.FC<CsvManagerModalProps> = ({
                 {bankFiles.map((f) => (
                   <div
                     key={f.fileName}
-                    className="py-2 flex items-center justify-between gap-2"
+                    className={`py-2.5 flex items-center justify-between gap-2 ${
+                      f.isPartial ? 'bg-amber-500/5 -mx-2 px-2 rounded-lg' : ''
+                    }`}
                   >
                     <div className="min-w-0">
-                      <div className="font-mono text-[11px] text-slate-200 truncate">
-                        {f.fileName}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-mono text-[11px] text-slate-200 truncate">
+                          {f.fileName}
+                        </span>
+                        {f.isPartial && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-[9px] font-bold text-amber-300 uppercase">
+                            Parcial • Atualizar
+                          </span>
+                        )}
                       </div>
-                      <div className="text-[10px] text-slate-400">
+                      <div className="text-[10px] text-slate-400 mt-0.5">
                         {f.rowCount} linhas • {formatDateBR(f.minDate)} a{' '}
                         {formatDateBR(f.maxDate)}
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-[11px] font-semibold text-rose-300">
-                        -{formatBRL(f.totalExpenses)}
-                      </div>
-                      <div className="text-[10px] text-emerald-400">
-                        +{formatBRL(f.totalIncome)}
+                    <div className="flex items-center gap-2.5 shrink-0">
+                      {onTogglePartialFile && (
+                        <button
+                          onClick={() =>
+                            onTogglePartialFile(
+                              'bankAccount',
+                              f.fileName,
+                              !f.isPartial
+                            )
+                          }
+                          title={
+                            f.isPartial
+                              ? 'Desmarcar como parcial (marcar como completo)'
+                              : 'Marcar este CSV como parcial para lembrar de atualizar no futuro'
+                          }
+                          className={`px-2 py-1 rounded-lg border text-[10px] font-semibold flex items-center gap-1 transition cursor-pointer ${
+                            f.isPartial
+                              ? 'bg-amber-500/20 border-amber-500/50 text-amber-200 hover:bg-amber-500/30'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-amber-300 hover:border-amber-500/40'
+                          }`}
+                        >
+                          <Clock className="w-3 h-3" />
+                          <span>{f.isPartial ? 'Parcial' : 'Marcar Parcial'}</span>
+                        </button>
+                      )}
+                      <div className="text-right">
+                        <div className="text-[11px] font-semibold text-rose-300">
+                          -{formatBRL(f.totalExpenses)}
+                        </div>
+                        <div className="text-[10px] text-emerald-400">
+                          +{formatBRL(f.totalIncome)}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -255,20 +297,55 @@ export const CsvManagerModal: React.FC<CsvManagerModalProps> = ({
                 {ccFiles.map((f) => (
                   <div
                     key={f.fileName}
-                    className="py-2 flex items-center justify-between gap-2"
+                    className={`py-2.5 flex items-center justify-between gap-2 ${
+                      f.isPartial ? 'bg-amber-500/5 -mx-2 px-2 rounded-lg' : ''
+                    }`}
                   >
                     <div className="min-w-0">
-                      <div className="font-mono text-[11px] text-slate-200 truncate">
-                        {f.fileName}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-mono text-[11px] text-slate-200 truncate">
+                          {f.fileName}
+                        </span>
+                        {f.isPartial && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-[9px] font-bold text-amber-300 uppercase">
+                            Parcial • Atualizar
+                          </span>
+                        )}
                       </div>
-                      <div className="text-[10px] text-slate-400">
+                      <div className="text-[10px] text-slate-400 mt-0.5">
                         {f.rowCount} lançamentos • Compras de{' '}
                         {formatDateBR(f.minDate)} a {formatDateBR(f.maxDate)}
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-[11px] font-semibold text-violet-300">
-                        {formatBRL(f.totalExpenses)}
+                    <div className="flex items-center gap-2.5 shrink-0">
+                      {onTogglePartialFile && (
+                        <button
+                          onClick={() =>
+                            onTogglePartialFile(
+                              'creditCard',
+                              f.fileName,
+                              !f.isPartial
+                            )
+                          }
+                          title={
+                            f.isPartial
+                              ? 'Desmarcar como parcial (marcar como completo)'
+                              : 'Marcar esta fatura CSV como parcial para lembrar de atualizar no futuro'
+                          }
+                          className={`px-2 py-1 rounded-lg border text-[10px] font-semibold flex items-center gap-1 transition cursor-pointer ${
+                            f.isPartial
+                              ? 'bg-amber-500/20 border-amber-500/50 text-amber-200 hover:bg-amber-500/30'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-amber-300 hover:border-amber-500/40'
+                          }`}
+                        >
+                          <Clock className="w-3 h-3" />
+                          <span>{f.isPartial ? 'Parcial' : 'Marcial Parcial'.replace('Marcial', 'Marcar')}</span>
+                        </button>
+                      )}
+                      <div className="text-right">
+                        <div className="text-[11px] font-semibold text-violet-300">
+                          {formatBRL(f.totalExpenses)}
+                        </div>
                       </div>
                     </div>
                   </div>

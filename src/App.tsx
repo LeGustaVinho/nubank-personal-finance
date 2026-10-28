@@ -21,6 +21,7 @@ import {
   SmartSuggestion,
   BehavioralInsight,
   CostTypeOverrideValue,
+  SourceType,
 } from '../server/types';
 import { AgyCliStatus, AgyAiBatchResult } from '../server/agyCliBridge';
 import { formatMonthFull, formatMonthShort } from './utils/formatters';
@@ -237,6 +238,21 @@ export const App: React.FC = () => {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ currentBankBalance: balance }),
+    });
+    if (res.ok) {
+      applyServerState(await res.json());
+    }
+  };
+
+  const handleTogglePartialFile = async (
+    source: SourceType,
+    fileName: string,
+    isPartial: boolean
+  ) => {
+    const res = await fetch('/api/files/partial', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source, fileName, isPartial }),
     });
     if (res.ok) {
       applyServerState(await res.json());
@@ -531,6 +547,7 @@ export const App: React.FC = () => {
                 allTransactions={transactions}
                 files={files}
                 onOpenUploadModal={() => setIsCsvModalOpen(true)}
+                onTogglePartialFile={handleTogglePartialFile}
               />
             )}
 
@@ -539,6 +556,7 @@ export const App: React.FC = () => {
                 allTransactions={transactions}
                 files={files}
                 onOpenUploadModal={() => setIsCsvModalOpen(true)}
+                onTogglePartialFile={handleTogglePartialFile}
               />
             )}
 
@@ -570,6 +588,7 @@ export const App: React.FC = () => {
         isOpen={isCsvModalOpen}
         onClose={() => setIsCsvModalOpen(false)}
         files={files}
+        onTogglePartialFile={handleTogglePartialFile}
         onUploadFiles={handleUploadFiles}
       />
     </div>

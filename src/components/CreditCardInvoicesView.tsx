@@ -7,8 +7,9 @@ import {
   ArrowDownLeft,
   Globe,
   Layers,
+  Clock,
 } from 'lucide-react';
-import { CsvFileSummary, UnifiedTransaction } from '../../server/types';
+import { CsvFileSummary, SourceType, UnifiedTransaction } from '../../server/types';
 import {
   formatBRL,
   formatDateBR,
@@ -21,13 +22,28 @@ interface CreditCardInvoicesViewProps {
   allTransactions: UnifiedTransaction[];
   files?: CsvFileSummary[];
   onOpenUploadModal?: () => void;
+  onTogglePartialFile?: (
+    source: SourceType,
+    fileName: string,
+    isPartial: boolean
+  ) => Promise<void>;
 }
 
 export const CreditCardInvoicesView: React.FC<CreditCardInvoicesViewProps> = ({
   allTransactions,
   files = [],
   onOpenUploadModal,
+  onTogglePartialFile,
 }) => {
+  const partialCcFiles = useMemo(() => {
+    const s = new Set<string>();
+    for (const f of files) {
+      if (f.source === 'creditCard' && f.isPartial) {
+        s.add(f.fileName);
+      }
+    }
+    return s;
+  }, [files]);
   const invoices = useMemo(() => {
     const map = new Map<
       string,
@@ -151,16 +167,41 @@ export const CreditCardInvoicesView: React.FC<CreditCardInvoicesViewProps> = ({
 
       {/* Horizontal Invoice Selector */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div className="flex items-center gap-2">
             <CreditCard className="w-5 h-5 text-violet-400" />
             <h2 className="text-base font-bold text-white">
               Faturas do Cartão Nubank ({invoices.length} faturas carregadas)
             </h2>
           </div>
-          <span className="text-xs text-slate-400 font-mono">
-            Arquivo: creditCard/{currentInvoice.fileName}
-          </span>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <span className="text-xs text-slate-400 font-mono">
+              Arquivo: creditCard/{currentInvoice.fileName}
+            </span>
+            {onTogglePartialFile && (
+              <button
+                onClick={() =>
+                  onTogglePartialFile(
+                    'creditCard',
+                    currentInvoice.fileName,
+                    !partialCcFiles.has(currentInvoice.fileName)
+                  )
+                }
+                className={`px-2.5 py-1 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                  partialCcFiles.has(currentInvoice.fileName)
+                    ? 'bg-amber-500/20 border-amber-500/50 text-amber-200 hover:bg-amber-500/30'
+                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-amber-300 hover:border-amber-500/40'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>
+                  {partialCcFiles.has(currentInvoice.fileName)
+                    ? 'Marcado como Parcial (Clique p/ Marcar Completo)'
+                    : 'Marcar CSV como Parcial'}
+                </span>
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-2.5 overflow-x-auto pb-2">
@@ -176,9 +217,16 @@ export const CreditCardInvoicesView: React.FC<CreditCardInvoicesViewProps> = ({
                     : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:bg-slate-800/60'
                 }`}
               >
-                <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                  <Calendar className="w-3 h-3" />
-                  <span>Venc. {formatDateBR(inv.invoiceDate)}</span>
+                <div className="text-[11px] text-slate-400 flex items-center justify-between gap-1.5">
+                  <span className="flex items-center gap-1">
+                    <Calendar className="w-3 h-3" />
+                    <span>Venc. {formatDateBR(inv.invoiceDate)}</span>
+                  </span>
+                  {partialCcFiles.has(inv.fileName) && (
+                    <span className="px-1.5 py-0.5 rounded bg-amber-500/25 border border-amber-500/50 text-[9px] font-bold text-amber-200 uppercase">
+                      Parcial
+                    </span>
+                  )}
                 </div>
                 <div className="text-sm font-bold mt-0.5">
                   {formatBRL(inv.netInvoiceTotal)}

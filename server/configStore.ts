@@ -57,6 +57,7 @@ export function loadUserConfig(): UserConfigStore {
         typeof parsed.currentBankBalance === 'number' && !Number.isNaN(parsed.currentBankBalance)
           ? parsed.currentBankBalance
           : null,
+      partialCsvFiles: Array.isArray(parsed.partialCsvFiles) ? parsed.partialCsvFiles : [],
     };
   } catch {
     return {
@@ -67,6 +68,7 @@ export function loadUserConfig(): UserConfigStore {
       categoryBudgets: {},
       costTypeOverrides: {},
       currentBankBalance: null,
+      partialCsvFiles: [],
     };
   }
 }
@@ -225,6 +227,22 @@ export function setCurrentBankBalance(balance: number | null): UserConfigStore {
     typeof balance === 'number' && !Number.isNaN(balance)
       ? Math.round(balance * 100) / 100
       : null;
+  saveUserConfig(config);
+  return config;
+}
+
+export function setCsvPartialFlag(
+  fileKey: string,
+  isPartial: boolean
+): UserConfigStore {
+  const config = loadUserConfig();
+  const set = new Set<string>(config.partialCsvFiles || []);
+  if (isPartial) {
+    set.add(fileKey);
+  } else {
+    set.delete(fileKey);
+  }
+  config.partialCsvFiles = Array.from(set);
   saveUserConfig(config);
   return config;
 }

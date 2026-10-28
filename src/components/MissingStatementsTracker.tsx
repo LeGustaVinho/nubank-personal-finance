@@ -56,15 +56,23 @@ export interface MonthCoverageStatus {
   shortLabel: string;
   fullLabel: string;
   hasBankStatement: boolean;
+  isBankPartial: boolean;
   bankFileNames: string[];
   bankTxCount: number;
   bankIncome: number;
   hasCreditCardInvoice: boolean;
+  isCcPartial: boolean;
   ccFileNames: string[];
   ccTxCount: number;
   ccExpenses: number;
   isFutureMonth: boolean;
-  status: 'complete' | 'missing_bank' | 'missing_cc' | 'missing_both' | 'future';
+  status:
+    | 'complete'
+    | 'partial'
+    | 'missing_bank'
+    | 'missing_cc'
+    | 'missing_both'
+    | 'future';
 }
 
 export const MissingStatementsTracker: React.FC<MissingStatementsTrackerProps> = ({
@@ -127,6 +135,22 @@ export const MissingStatementsTracker: React.FC<MissingStatementsTrackerProps> =
       const hasCreditCardInvoice =
         ccInvoiceTxs.length > 0 || ccFilesForMonth.length > 0;
 
+      const bankFileSet = new Set([
+        ...bankFilesForMonth.map((f) => f.fileName),
+        ...bankTxs.map((t) => t.sourceFile),
+      ]);
+      const ccFileSet = new Set([
+        ...ccFilesForMonth.map((f) => f.fileName),
+        ...ccInvoiceTxs.map((t) => t.sourceFile),
+      ]);
+
+      const isBankPartial = files.some(
+        (f) => f.source === 'bankAccount' && bankFileSet.has(f.fileName) && f.isPartial
+      );
+      const isCcPartial = files.some(
+        (f) => f.source === 'creditCard' && ccFileSet.has(f.fileName) && f.isPartial
+      );
+
       const bankIncome = bankTxs
         .filter((t) => t.flowKind === 'income')
         .reduce((acc, t) => acc + t.incomeAmount, 0);
@@ -141,14 +165,16 @@ export const MissingStatementsTracker: React.FC<MissingStatementsTrackerProps> =
       let status: MonthCoverageStatus['status'] = 'complete';
       if (isFutureMonth) {
         status = 'future';
-      } else if (hasBankStatement && hasCreditCardInvoice) {
-        status = 'complete';
       } else if (!hasBankStatement && hasCreditCardInvoice) {
         status = 'missing_bank';
       } else if (hasBankStatement && !hasCreditCardInvoice) {
         status = 'missing_cc';
-      } else {
+      } else if (!hasBankStatement && !hasCreditCardInvoice) {
         status = 'missing_both';
+      } else if (isBankPartial || isCcPartial) {
+        status = 'partial';
+      } else {
+        status = 'complete';
       }
 
       result.push({
@@ -157,21 +183,13 @@ export const MissingStatementsTracker: React.FC<MissingStatementsTrackerProps> =
         shortLabel: MONTH_NAMES_SHORT[mIdx],
         fullLabel: `${MONTH_NAMES_FULL[mIdx]} de ${selectedYear}`,
         hasBankStatement,
-        bankFileNames: Array.from(
-          new Set([
-            ...bankFilesForMonth.map((f) => f.fileName),
-            ...bankTxs.map((t) => t.sourceFile),
-          ])
-        ),
+        isBankPartial,
+        bankFileNames: Array.from(bankFileSet),
         bankTxCount: bankTxs.length,
         bankIncome,
         hasCreditCardInvoice,
-        ccFileNames: Array.from(
-          new Set([
-            ...ccFilesForMonth.map((f) => f.fileName),
-            ...ccInvoiceTxs.map((t) => t.sourceFile),
-          ])
-        ),
+        isCcPartial,
+        ccFileNames: Array.from(ccFileSet),
         ccTxCount: ccInvoiceTxs.length,
         ccExpenses,
         isFutureMonth,
@@ -184,6 +202,9 @@ export const MissingStatementsTracker: React.FC<MissingStatementsTrackerProps> =
 
   const summary = useMemo(() => {
     const completeMonths = coverageByMonth.filter((m) => m.status === 'complete');
+    const partialMonths = coverageByMonth.filter(
+      (m) => m.isBankPartial || m.isCcPartial
+    );
     const missingBankMonths = coverageByMonth.filter(
       (m) => m.status === 'missing_bank' || m.status === 'missing_both'
     );
@@ -196,14 +217,17 @@ export const MissingStatementsTracker: React.FC<MissingStatementsTrackerProps> =
         m.status === 'missing_cc' ||
         m.status === 'missing_both'
     );
+    const allPartialFiles = files.filter((f) => f.isPartial);
 
     return {
       completeCount: completeMonths.length,
+      partialMonths,
+      allPartialFiles,
       missingBankMonths,
       missingCcMonths,
       pendingMonths,
     };
-  }, [coverageByMonth]);
+  }, [coverageByMonth, files]);
 
   return (
     <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg">
@@ -239,6 +263,17 @@ export const MissingStatementsTracker: React.FC<MissingStatementsTrackerProps> =
                     : 'meses com CSV faltando'}
                 </span>
               )}
+              {summary.allPartialFiles.length > 0 && (
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40 flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  <span>
+                    {summary.allPartialFiles.length}{' '}
+                    {summary.allPartialFiles.length === 1
+                      ? 'CSV marcado como parcial (atualizar depois)'
+                      : 'CSVs marcados como parciais (atualizar depois)'}
+                  </span>
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
               {summary.pendingMonths.length > 0 ? (
@@ -258,6 +293,19 @@ export const MissingStatementsTracker: React.FC<MissingStatementsTrackerProps> =
                 </>
               ) : (
                 'Todos os extratos da conta corrente e faturas do cartão até o momento foram enviados!'
+              )}
+              {summary.allPartialFiles.length > 0 && (
+                <span className="block text-sky-300 mt-0.5">
+                  Lembrete de CSV parcial para atualizar:{' '}
+                  <strong>
+                    {summary.allPartialFiles
+                      .map(
+                        (f) =>
+                          `${f.source === 'bankAccount' ? 'Conta' : 'Cartão'}: ${f.fileName}`
+                      )
+                      .join(' • ')}
+                  </strong>
+                </span>
               )}
             </p>
           </div>
@@ -307,6 +355,7 @@ export const MissingStatementsTracker: React.FC<MissingStatementsTrackerProps> =
         <div className="mt-4 pt-3 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-12 gap-2">
           {coverageByMonth.map((m) => {
             const isComplete = m.status === 'complete';
+            const isPartial = m.status === 'partial' || m.isBankPartial || m.isCcPartial;
             const isFuture = m.status === 'future';
             const isMissingSomething =
               m.status === 'missing_bank' ||
@@ -317,18 +366,22 @@ export const MissingStatementsTracker: React.FC<MissingStatementsTrackerProps> =
               <div
                 key={m.monthKey}
                 onClick={() => {
-                  if (isMissingSomething) onOpenUploadModal();
+                  if (isMissingSomething || isPartial) onOpenUploadModal();
                 }}
                 title={
                   isMissingSomething
                     ? `Clique para enviar o CSV faltante de ${m.fullLabel}`
+                    : isPartial
+                    ? `Mês com CSV marcado como parcial em ${m.fullLabel} — clique para atualizar`
                     : m.fullLabel
                 }
                 className={`p-2.5 rounded-xl border transition flex flex-col justify-between ${
-                  isComplete
-                    ? 'bg-emerald-950/20 border-emerald-500/30'
-                    : isMissingSomething
+                  isMissingSomething
                     ? 'bg-amber-950/25 border-amber-500/50 hover:bg-amber-900/30 cursor-pointer'
+                    : isPartial
+                    ? 'bg-sky-950/25 border-sky-500/50 hover:bg-sky-900/30 cursor-pointer'
+                    : isComplete
+                    ? 'bg-emerald-950/20 border-emerald-500/30'
                     : 'bg-slate-950/40 border-slate-800/60 opacity-60'
                 }`}
               >
@@ -337,8 +390,11 @@ export const MissingStatementsTracker: React.FC<MissingStatementsTrackerProps> =
                   <span className="text-xs font-bold text-white">
                     {m.shortLabel}/{selectedYear.slice(2)}
                   </span>
-                  {isComplete && (
+                  {isComplete && !isPartial && (
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  )}
+                  {isPartial && !isMissingSomething && (
+                    <Clock className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                   )}
                   {isMissingSomething && (
                     <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
@@ -351,7 +407,9 @@ export const MissingStatementsTracker: React.FC<MissingStatementsTrackerProps> =
                   {/* Bank Account Status */}
                   <div
                     className={`flex items-center justify-between px-1.5 py-1 rounded ${
-                      m.hasBankStatement
+                      m.isBankPartial
+                        ? 'bg-amber-500/20 text-amber-300 font-semibold'
+                        : m.hasBankStatement
                         ? 'bg-emerald-500/15 text-emerald-300'
                         : isFuture
                         ? 'bg-slate-900 text-slate-500'
@@ -363,7 +421,9 @@ export const MissingStatementsTracker: React.FC<MissingStatementsTrackerProps> =
                       <span>Conta</span>
                     </span>
                     <span>
-                      {m.hasBankStatement
+                      {m.isBankPartial
+                        ? 'PARCIAL'
+                        : m.hasBankStatement
                         ? 'OK'
                         : isFuture
                         ? '—'
@@ -374,7 +434,9 @@ export const MissingStatementsTracker: React.FC<MissingStatementsTrackerProps> =
                   {/* Credit Card Status */}
                   <div
                     className={`flex items-center justify-between px-1.5 py-1 rounded ${
-                      m.hasCreditCardInvoice
+                      m.isCcPartial
+                        ? 'bg-amber-500/20 text-amber-300 font-semibold'
+                        : m.hasCreditCardInvoice
                         ? 'bg-violet-500/20 text-violet-300'
                         : isFuture
                         ? 'bg-slate-900 text-slate-500'
@@ -386,7 +448,9 @@ export const MissingStatementsTracker: React.FC<MissingStatementsTrackerProps> =
                       <span>Cartão</span>
                     </span>
                     <span>
-                      {m.hasCreditCardInvoice
+                      {m.isCcPartial
+                        ? 'PARCIAL'
+                        : m.hasCreditCardInvoice
                         ? 'OK'
                         : isFuture
                         ? '—'

@@ -17,6 +17,7 @@ import {
   setTransactionOverride,
   setMerchantCostTypeOverride,
   setCurrentBankBalance,
+  setCsvPartialFlag,
   learnPatternFromUser,
   deleteLearnedPattern,
   dismissSuggestion,
@@ -51,12 +52,18 @@ app.get('/api/health', (_req, res) => {
 
 function getFullState() {
   const config = loadUserConfig();
-  const { transactions, files } = loadAllTransactionsFromDisk(
+  const partialSet = new Set<string>(config.partialCsvFiles || []);
+  const { transactions, files: rawFiles } = loadAllTransactionsFromDisk(
     ROOT_DIR,
     config.rules,
     config.overrides,
     config.learnedPatterns
   );
+
+  const files = rawFiles.map((f) => ({
+    ...f,
+    isPartial: partialSet.has(`${f.source}/${f.fileName}`) || partialSet.has(f.fileName),
+  }));
 
   const categorySet = new Set<string>(DEFAULT_CATEGORIES);
   for (const r of config.rules) {
@@ -289,6 +296,13 @@ app.post('/api/upload', async (req, res) => {
       const targetPath = path.join(targetDir, resolvedFinalName);
       fs.writeFileSync(targetPath, item.content, 'utf-8');
 
+      // Se um arquivo antigo estava marcado como parcial e foi substituído/atualizado, limpa a flag parcial automaticamente
+      setCsvPartialFlag(`${detected}/${resolvedFinalName}`, false);
+      for (const oldFile of replacedPartialFiles) {
+        setCsvPartialFlag(`${detected}/${oldFile}`, false);
+        setCsvPartialFlag(oldFile, false);
+      }
+
       const replaceNote =
         replacedPartialFiles.length > 0
           ? ` • Substituiu parcial: ${replacedPartialFiles.join(', ')}`
@@ -478,6 +492,23 @@ app.put('/api/bank-balance', (req, res) => {
     res.json(getFullState());
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'Erro ao atualizar saldo atual da conta' });
+  }
+});
+
+app.put('/api/files/partial', (req, res) => {
+  try {
+    const { source, fileName, isPartial } = req.body || {};
+    if (!source || !fileName) {
+      res.status(400).json({ error: 'source e fileName são obrigatórios' });
+      return;
+    }
+    setCsvPartialFlag(`${source}/${fileName}`, Boolean(isPartial));
+    if (!isPartial) {
+      setCsvPartialFlag(fileName, false);
+    }
+    res.json(getFullState());
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Erro ao atualizar marcação de CSV parcial' });
   }
 });
 

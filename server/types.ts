@@ -156,6 +156,7 @@ export interface UserConfigStore {
   categoryBudgets: Record<string, number>;
   costTypeOverrides?: Record<string, CostTypeOverrideValue>;
   currentBankBalance?: number | null;
+  partialCsvFiles?: string[];
 }
 
 export interface CsvFileSummary {
@@ -167,4 +168,5 @@ export interface CsvFileSummary {
   totalExpenses: number;
   totalIncome: number;
   invoiceDate: string | null;
+  isPartial?: boolean;
 }
