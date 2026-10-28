@@ -85,10 +85,48 @@ const FIXED_COST_GROUPS = new Set([
   'GL Apoio Adm e Locações',
 ]);
 
+function getMaxConsecutiveActiveMonths(byMonth: Map<string, number>): number {
+  const activeMonthKeys = Array.from(byMonth.entries())
+    .filter(([, val]) => val > 0)
+    .map(([m]) => m)
+    .sort();
+
+  if (activeMonthKeys.length === 0) return 0;
+
+  const indices = activeMonthKeys
+    .map((ym) => {
+      const [yStr, mStr] = ym.split('-');
+      const y = Number(yStr);
+      const m = Number(mStr);
+      if (Number.isNaN(y) || Number.isNaN(m)) return null;
+      return y * 12 + (m - 1);
+    })
+    .filter((n): n is number => n !== null);
+
+  if (indices.length === 0) return 0;
+
+  let maxStreak = 1;
+  let currentStreak = 1;
+
+  for (let i = 1; i < indices.length; i++) {
+    if (indices[i] === indices[i - 1] + 1) {
+      currentStreak += 1;
+      if (currentStreak > maxStreak) {
+        maxStreak = currentStreak;
+      }
+    } else if (indices[i] !== indices[i - 1]) {
+      currentStreak = 1;
+    }
+  }
+
+  return maxStreak;
+}
+
 function classifyServiceCostType(
   merchantGroup: string,
   category: string,
   activeMonths: number,
+  maxConsecutiveMonths: number,
   cv: number,
   override?: CostTypeOverrideValue
 ): { costType: CostClassification; isManualOverride: boolean } {
@@ -107,10 +145,13 @@ function classifyServiceCostType(
   ) {
     return { costType: 'fixed_cost', isManualOverride: false };
   }
-  if (activeMonths >= 3 && cv < 0.15) {
+  if (maxConsecutiveMonths >= 3 && activeMonths >= 3 && cv < 0.15) {
     return { costType: 'fixed_cost', isManualOverride: false };
   }
-  return { costType: 'variable_recurring', isManualOverride: false };
+  if (maxConsecutiveMonths >= 3) {
+    return { costType: 'variable_recurring', isManualOverride: false };
+  }
+  return { costType: 'one_off', isManualOverride: false };
 }
 
 export const RecurringAndInstallmentsView: React.FC<
@@ -219,23 +260,7 @@ export const RecurringAndInstallmentsView: React.FC<
       if (item.totalSpent <= 0) continue;
 
       const userOverride = costTypeOverrides[item.merchantGroup];
-
-      const isKnownSubOrFixed =
-        Boolean(userOverride) ||
-        DIGITAL_SUBSCRIPTION_GROUPS.has(item.merchantGroup) ||
-        FIXED_COST_GROUPS.has(item.merchantGroup) ||
-        item.category === 'Assinaturas Digitais & IA' ||
-        item.category === 'Moradia & Contas Fixas';
-
-      // Include if user explicitly overrode, or if it's recurring (>=2 months / >=2 charges), or if user is searching all
-      if (
-        !isKnownSubOrFixed &&
-        activeMonthsCount < 2 &&
-        item.totalOccurrences < 2 &&
-        !search.trim()
-      ) {
-        continue;
-      }
+      const maxConsecutiveMonths = getMaxConsecutiveActiveMonths(item.byMonth);
 
       const monthlyAverage =
         activeMonthsCount > 0 ? item.totalSpent / activeMonthsCount : item.totalSpent;
@@ -253,6 +278,7 @@ export const RecurringAndInstallmentsView: React.FC<
         item.merchantGroup,
         item.category,
         activeMonthsCount,
+        maxConsecutiveMonths,
         cv,
         userOverride
       );
@@ -264,7 +290,7 @@ export const RecurringAndInstallmentsView: React.FC<
           ? 'Custo Fixo'
           : costType === 'variable_recurring'
           ? 'Custo Variável'
-          : 'Gasto Pontual';
+          : 'Custo Pontual';
 
       profiles.push({
         merchantGroup: item.merchantGroup,
@@ -583,7 +609,7 @@ export const RecurringAndInstallmentsView: React.FC<
                 ? [
                     {
                       id: 'one_off',
-                      label: `Gastos Pontuais (${summaryStats.oneOffCount})`,
+                      label: `Custos Pontuais (${summaryStats.oneOffCount})`,
                     },
                   ]
                 : []),
@@ -767,7 +793,7 @@ export const RecurringAndInstallmentsView: React.FC<
                               Custo Variável
                             </option>
                             <option value="one_off" className="bg-slate-900 text-slate-400">
-                              Gasto Pontual (Ocultar)
+                              Custo Pontual
                             </option>
                           </select>
 
