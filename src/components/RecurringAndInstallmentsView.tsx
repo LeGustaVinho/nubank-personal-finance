@@ -59,6 +59,7 @@ export interface ServiceRecurringProfile {
   minMonthly: number;
   maxMonthly: number;
   byMonth: Map<string, number>;
+  activeInLast3Months: boolean;
   primarySource: 'creditCard' | 'bankAccount' | 'both';
   items: UnifiedTransaction[];
 }
@@ -163,6 +164,7 @@ export const RecurringAndInstallmentsView: React.FC<
   const [billingFilter, setBillingFilter] = useState<
     'ALL' | 'international' | 'national'
   >('ALL');
+  const [onlyActiveLast3Months, setOnlyActiveLast3Months] = useState<boolean>(false);
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<
@@ -177,6 +179,20 @@ export const RecurringAndInstallmentsView: React.FC<
     }
     return Array.from(s).sort();
   }, [allTransactions]);
+
+  const last3MonthsRange = useMemo(() => {
+    const latestMonth = allMonths[allMonths.length - 1];
+    if (!latestMonth) return { minMonth: '', maxMonth: '' };
+    const [yStr, mStr] = latestMonth.split('-');
+    const y = Number(yStr);
+    const m = Number(mStr);
+    if (Number.isNaN(y) || Number.isNaN(m)) {
+      return { minMonth: latestMonth, maxMonth: latestMonth };
+    }
+    const d = new Date(y, m - 1 - 2, 1);
+    const minMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    return { minMonth, maxMonth: latestMonth };
+  }, [allMonths]);
 
   const services = useMemo(() => {
     const map = new Map<
@@ -292,6 +308,15 @@ export const RecurringAndInstallmentsView: React.FC<
           ? 'Custo Variável'
           : 'Custo Pontual';
 
+      const activeInLast3Months = last3MonthsRange.minMonth
+        ? Array.from(item.byMonth.entries()).some(
+            ([m, val]) =>
+              m >= last3MonthsRange.minMonth &&
+              m <= last3MonthsRange.maxMonth &&
+              val > 0
+          )
+        : true;
+
       profiles.push({
         merchantGroup: item.merchantGroup,
         category: item.category,
@@ -309,6 +334,7 @@ export const RecurringAndInstallmentsView: React.FC<
         minMonthly: Math.round(minMonthly * 100) / 100,
         maxMonthly: Math.round(maxMonthly * 100) / 100,
         byMonth: item.byMonth,
+        activeInLast3Months,
         primarySource:
           item.hasCC && item.hasBank
             ? 'both'
@@ -320,7 +346,7 @@ export const RecurringAndInstallmentsView: React.FC<
     }
 
     return profiles;
-  }, [allTransactions, costTypeOverrides, search]);
+  }, [allTransactions, costTypeOverrides, search, last3MonthsRange]);
 
   const installmentPlans = useMemo(() => {
     const map = new Map<
@@ -385,10 +411,14 @@ export const RecurringAndInstallmentsView: React.FC<
   }, [allTransactions]);
 
   const summaryStats = useMemo(() => {
-    const subs = services.filter((s) => s.costType === 'digital_subscription');
-    const fixed = services.filter((s) => s.costType === 'fixed_cost');
-    const variable = services.filter((s) => s.costType === 'variable_recurring');
-    const oneOff = services.filter((s) => s.costType === 'one_off');
+    const baseServices = onlyActiveLast3Months
+      ? services.filter((s) => s.activeInLast3Months)
+      : services;
+
+    const subs = baseServices.filter((s) => s.costType === 'digital_subscription');
+    const fixed = baseServices.filter((s) => s.costType === 'fixed_cost');
+    const variable = baseServices.filter((s) => s.costType === 'variable_recurring');
+    const oneOff = baseServices.filter((s) => s.costType === 'one_off');
 
     const subsMonthly = subs.reduce((acc, s) => acc + s.monthlyAverage, 0);
     const subsTotal = subs.reduce((acc, s) => acc + s.totalSpent, 0);
@@ -404,6 +434,7 @@ export const RecurringAndInstallmentsView: React.FC<
       .reduce((acc, p) => acc + p.amountPerInstallment, 0);
 
     return {
+      totalBaseCount: baseServices.length,
       subsCount: subs.length,
       subsMonthly,
       subsTotal,
@@ -417,7 +448,7 @@ export const RecurringAndInstallmentsView: React.FC<
       committedMonthlyTotal: subsMonthly + fixedMonthly + activeInstallmentsMonthly,
       activeInstallmentsMonthly,
     };
-  }, [services, installmentPlans]);
+  }, [services, installmentPlans, onlyActiveLast3Months]);
 
   const availableCategories = useMemo(() => {
     const set = new Set<string>();
@@ -428,6 +459,9 @@ export const RecurringAndInstallmentsView: React.FC<
   const filteredServices = useMemo(() => {
     return services
       .filter((s) => {
+        if (onlyActiveLast3Months && !s.activeInLast3Months) {
+          return false;
+        }
         if (filterType === 'ALL') {
           // By default hide items explicitly marked as 'one_off' unless searching or filtering 'one_off'
           if (s.costType === 'one_off' && !search.trim()) return false;
@@ -455,7 +489,15 @@ export const RecurringAndInstallmentsView: React.FC<
         if (sortBy === 'lastDate') return b.lastChargeDate.localeCompare(a.lastChargeDate);
         return a.merchantGroup.localeCompare(b.merchantGroup);
       });
-  }, [services, filterType, billingFilter, categoryFilter, search, sortBy]);
+  }, [
+    services,
+    onlyActiveLast3Months,
+    filterType,
+    billingFilter,
+    categoryFilter,
+    search,
+    sortBy,
+  ]);
 
   return (
     <div className="space-y-8">
@@ -586,7 +628,7 @@ export const RecurringAndInstallmentsView: React.FC<
               {
                 id: 'ALL',
                 label: `Todos os Recorrentes (${
-                  services.length - summaryStats.oneOffCount
+                  summaryStats.totalBaseCount - summaryStats.oneOffCount
                 })`,
               },
               {
@@ -628,38 +670,71 @@ export const RecurringAndInstallmentsView: React.FC<
             ))}
           </div>
 
-          <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => setBillingFilter('ALL')}
-              className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
-                billingFilter === 'ALL'
-                  ? 'bg-slate-800 text-white font-medium'
-                  : 'text-slate-400 hover:text-white'
+              onClick={() => setOnlyActiveLast3Months(!onlyActiveLast3Months)}
+              title={
+                last3MonthsRange.minMonth
+                  ? `Filtra apenas serviços com ocorrência entre ${formatMonthShort(
+                      last3MonthsRange.minMonth
+                    )} e ${formatMonthShort(last3MonthsRange.maxMonth)}`
+                  : 'Filtra apenas serviços com ocorrência nos últimos 3 meses'
+              }
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 border cursor-pointer ${
+                onlyActiveLast3Months
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-sm shadow-emerald-500/10'
+                  : 'bg-slate-950 text-slate-400 hover:text-white border-slate-800'
               }`}
             >
-              Todas Moedas
+              <Clock className="w-3.5 h-3.5" />
+              <span>Ativo nos últimos 3 meses</span>
+              {last3MonthsRange.minMonth && (
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded-md ${
+                    onlyActiveLast3Months
+                      ? 'bg-emerald-500/25 text-emerald-200'
+                      : 'bg-slate-900 text-slate-500'
+                  }`}
+                >
+                  {formatMonthShort(last3MonthsRange.minMonth)}–
+                  {formatMonthShort(last3MonthsRange.maxMonth)}
+                </span>
+              )}
             </button>
-            <button
-              onClick={() => setBillingFilter('international')}
-              className={`px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer ${
-                billingFilter === 'international'
-                  ? 'bg-amber-500/20 text-amber-300 font-medium'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Globe className="w-3 h-3" />
-              <span>Internacional + IOF</span>
-            </button>
-            <button
-              onClick={() => setBillingFilter('national')}
-              className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
-                billingFilter === 'national'
-                  ? 'bg-slate-800 text-white font-medium'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Nacional (R$)
-            </button>
+
+            <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+              <button
+                onClick={() => setBillingFilter('ALL')}
+                className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
+                  billingFilter === 'ALL'
+                    ? 'bg-slate-800 text-white font-medium'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Todas Moedas
+              </button>
+              <button
+                onClick={() => setBillingFilter('international')}
+                className={`px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer ${
+                  billingFilter === 'international'
+                    ? 'bg-amber-500/20 text-amber-300 font-medium'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Globe className="w-3 h-3" />
+                <span>Internacional + IOF</span>
+              </button>
+              <button
+                onClick={() => setBillingFilter('national')}
+                className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
+                  billingFilter === 'national'
+                    ? 'bg-slate-800 text-white font-medium'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Nacional (R$)
+              </button>
+            </div>
           </div>
         </div>
 
