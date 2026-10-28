@@ -64,7 +64,18 @@ export const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   // Global Filters & Toggles
-  const [selectedMonth, setSelectedMonth] = useState<string>('ALL');
+  type PeriodPreset =
+    | 'LIFETIME'
+    | 'LAST_MONTH'
+    | 'LAST_3_MONTHS'
+    | 'LAST_YEAR'
+    | 'SPECIFIC_MONTH'
+    | 'DATE_RANGE';
+
+  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('LIFETIME');
+  const [specificMonth, setSpecificMonth] = useState<string>('');
+  const [customStartDate, setCustomStartDate] = useState<string>('');
+  const [customEndDate, setCustomEndDate] = useState<string>('');
   const [includeIof, setIncludeIof] = useState(true);
   const [netRefunds, setNetRefunds] = useState(true);
   const [focusedGroup, setFocusedGroup] = useState<string | null>(null);
@@ -115,10 +126,98 @@ export const App: React.FC = () => {
     return Array.from(set).sort((a, b) => b.localeCompare(a));
   }, [transactions]);
 
+  const datasetDateBounds = useMemo(() => {
+    if (transactions.length === 0) {
+      return { minDate: '2026-01-01', maxDate: '2026-12-31' };
+    }
+    let minD = '9999-99-99';
+    let maxD = '0000-00-00';
+    for (const tx of transactions) {
+      if (tx.date < minD) minD = tx.date;
+      if (tx.date > maxD) maxD = tx.date;
+    }
+    return { minDate: minD, maxDate: maxD };
+  }, [transactions]);
+
+  useEffect(() => {
+    if (availableMonths.length > 0 && !specificMonth) {
+      setSpecificMonth(availableMonths[0]);
+    }
+  }, [availableMonths, specificMonth]);
+
+  useEffect(() => {
+    if (transactions.length > 0 && !customStartDate && !customEndDate) {
+      setCustomStartDate(datasetDateBounds.minDate);
+      setCustomEndDate(datasetDateBounds.maxDate);
+    }
+  }, [transactions.length, datasetDateBounds, customStartDate, customEndDate]);
+
+  // Helper to shift a YYYY-MM string backward by N months
+  const shiftYearMonth = (ym: string, deltaMonths: number): string => {
+    const [yStr, mStr] = ym.split('-');
+    const y = Number(yStr);
+    const m = Number(mStr);
+    if (Number.isNaN(y) || Number.isNaN(m)) return ym;
+    const d = new Date(y, m - 1 + deltaMonths, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+
   const filteredTransactions = useMemo(() => {
-    if (selectedMonth === 'ALL') return transactions;
-    return transactions.filter((tx) => tx.competenceMonth === selectedMonth);
-  }, [transactions, selectedMonth]);
+    if (periodPreset === 'LIFETIME') return transactions;
+
+    const latestMonth = availableMonths[0];
+    if (periodPreset === 'LAST_MONTH') {
+      if (!latestMonth) return transactions;
+      return transactions.filter((tx) => tx.competenceMonth === latestMonth);
+    }
+
+    if (periodPreset === 'LAST_3_MONTHS') {
+      if (!latestMonth) return transactions;
+      const minMonth = shiftYearMonth(latestMonth, -2);
+      return transactions.filter(
+        (tx) => tx.competenceMonth >= minMonth && tx.competenceMonth <= latestMonth
+      );
+    }
+
+    if (periodPreset === 'LAST_YEAR') {
+      if (!latestMonth) return transactions;
+      const minMonth = shiftYearMonth(latestMonth, -11);
+      return transactions.filter(
+        (tx) => tx.competenceMonth >= minMonth && tx.competenceMonth <= latestMonth
+      );
+    }
+
+    if (periodPreset === 'SPECIFIC_MONTH') {
+      const target = specificMonth || latestMonth;
+      if (!target) return transactions;
+      return transactions.filter((tx) => tx.competenceMonth === target);
+    }
+
+    if (periodPreset === 'DATE_RANGE') {
+      return transactions.filter((tx) => {
+        if (customStartDate && tx.date < customStartDate) return false;
+        if (customEndDate && tx.date > customEndDate) return false;
+        return true;
+      });
+    }
+
+    return transactions;
+  }, [
+    transactions,
+    periodPreset,
+    availableMonths,
+    specificMonth,
+    customStartDate,
+    customEndDate,
+  ]);
+
+  // Single-month equivalent for components that check if a single month is active (e.g. monthly budget progress)
+  const effectiveSelectedMonth = useMemo(() => {
+    if (periodPreset === 'LAST_MONTH') return availableMonths[0] || 'ALL';
+    if (periodPreset === 'SPECIFIC_MONTH')
+      return specificMonth || availableMonths[0] || 'ALL';
+    return 'ALL';
+  }, [periodPreset, availableMonths, specificMonth]);
 
   const handleSaveRule = async (
     rule: Partial<GroupingRule> & {
@@ -354,23 +453,79 @@ export const App: React.FC = () => {
             {activeTab !== 'invoices' &&
               activeTab !== 'bank_statements' &&
               activeTab !== 'recurring' && (
-              <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5">
-                <Calendar className="w-3.5 h-3.5 text-violet-400" />
-                <span className="text-xs text-slate-400">Período:</span>
-                <select
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
-                  className="bg-transparent text-xs font-semibold text-white focus:outline-none cursor-pointer"
-                >
-                  <option value="ALL" className="bg-slate-900">
-                    Todo o Período ({availableMonths.length} meses)
-                  </option>
-                  {availableMonths.map((m) => (
-                    <option key={m} value={m} className="bg-slate-900">
-                      {formatMonthFull(m)} ({formatMonthShort(m)})
+              <div className="flex flex-wrap items-center gap-2 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5">
+                <div className="flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                  <span className="text-xs text-slate-400">Período:</span>
+                  <select
+                    value={periodPreset}
+                    onChange={(e) => setPeriodPreset(e.target.value as PeriodPreset)}
+                    className="bg-transparent text-xs font-semibold text-white focus:outline-none cursor-pointer"
+                  >
+                    <option value="LIFETIME" className="bg-slate-900">
+                      Life Time — Todo o Histórico ({availableMonths.length} meses)
                     </option>
-                  ))}
-                </select>
+                    <option value="LAST_MONTH" className="bg-slate-900">
+                      Último Mês ({availableMonths[0] ? formatMonthShort(availableMonths[0]) : 'Atual'})
+                    </option>
+                    <option value="LAST_3_MONTHS" className="bg-slate-900">
+                      Últimos 3 Meses
+                    </option>
+                    <option value="LAST_YEAR" className="bg-slate-900">
+                      Último Ano (12 meses)
+                    </option>
+                    <option value="SPECIFIC_MONTH" className="bg-slate-900">
+                      Mês Específico...
+                    </option>
+                    <option value="DATE_RANGE" className="bg-slate-900">
+                      Range entre Datas...
+                    </option>
+                  </select>
+                </div>
+
+                {/* Specific Month Secondary Selector */}
+                {periodPreset === 'SPECIFIC_MONTH' && (
+                  <div className="flex items-center gap-1.5 pl-2 border-l border-slate-700">
+                    <select
+                      value={specificMonth || availableMonths[0] || ''}
+                      onChange={(e) => setSpecificMonth(e.target.value)}
+                      className="bg-slate-950 border border-violet-500/40 rounded-lg px-2 py-1 text-xs font-semibold text-violet-200 focus:outline-none focus:border-violet-500 cursor-pointer"
+                    >
+                      {availableMonths.map((m) => (
+                        <option key={m} value={m} className="bg-slate-900">
+                          {formatMonthFull(m)} ({formatMonthShort(m)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Custom Date Range Inputs */}
+                {periodPreset === 'DATE_RANGE' && (
+                  <div className="flex flex-wrap items-center gap-1.5 pl-2 border-l border-slate-700 text-xs">
+                    <input
+                      type="date"
+                      value={customStartDate}
+                      min={datasetDateBounds.minDate}
+                      max={customEndDate || datasetDateBounds.maxDate}
+                      onChange={(e) => setCustomStartDate(e.target.value)}
+                      className="bg-slate-950 border border-violet-500/40 rounded-lg px-2 py-0.5 text-xs font-mono text-white focus:outline-none focus:border-violet-500"
+                    />
+                    <span className="text-slate-500">até</span>
+                    <input
+                      type="date"
+                      value={customEndDate}
+                      min={customStartDate || datasetDateBounds.minDate}
+                      max={datasetDateBounds.maxDate}
+                      onChange={(e) => setCustomEndDate(e.target.value)}
+                      className="bg-slate-950 border border-violet-500/40 rounded-lg px-2 py-0.5 text-xs font-mono text-white focus:outline-none focus:border-violet-500"
+                    />
+                  </div>
+                )}
+
+                <span className="px-2 py-0.5 rounded-full bg-violet-500/15 text-[10px] font-mono font-semibold text-violet-300">
+                  {filteredTransactions.length} lanç.
+                </span>
               </div>
             )}
 
@@ -501,7 +656,7 @@ export const App: React.FC = () => {
                 transactions={filteredTransactions}
                 allTransactions={transactions}
                 files={files}
-                selectedMonth={selectedMonth}
+                selectedMonth={effectiveSelectedMonth}
                 includeIof={includeIof}
                 setIncludeIof={setIncludeIof}
                 netRefunds={netRefunds}
