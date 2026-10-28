@@ -16,6 +16,7 @@ export const DEFAULT_CATEGORIES = [
   'Saúde & Farmácia',
   'Assinaturas Digitais & IA',
   'Games & Entretenimento',
+  'Conteúdo Adulto',
   'Compras & E-commerce',
   'Moda, Beleza & Estética',
   'Pets & Veterinária',
@@ -612,6 +613,13 @@ const SEMANTIC_SECTOR_DICTIONARY: Array<{
     keywords: [
       'steam', 'ccp games', 'blizzard', 'riot', 'epic games', 'playstation',
       'xbox', 'nintendo', 'nexusmods', 'nitrado', 'ingresso', 'cinema', 'sympla',
+    ],
+  },
+  {
+    category: 'Conteúdo Adulto',
+    keywords: [
+      'onlyfans', 'privacy', 'fansly', 'chaturbate', 'stripchat', 'patreon',
+      'cam4', 'manyvids', 'pornhub', 'xvideos', 'erome', 'camera prive', 'cameraprive',
     ],
   },
   {

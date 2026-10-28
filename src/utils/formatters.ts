@@ -63,6 +63,7 @@ export const CATEGORY_COLORS: Record<string, string> = {
   'Saúde & Farmácia': '#10b981',            // emerald-500
   'Assinaturas Digitais & IA': '#8b5cf6',   // violet-500
   'Games & Entretenimento': '#a855f7',      // purple-500
+  'Conteúdo Adulto': '#e11d48',             // rose-600
   'Compras & E-commerce': '#f43f5e',        // rose-500
   'Moda, Beleza & Estética': '#d946ef',     // fuchsia-500
   'Moda & Vestuário': '#d946ef',            // fuchsia-500
