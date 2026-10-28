@@ -275,7 +275,7 @@ export function parseCreditCardRow(
   const invoiceDate = extractInvoiceDateFromFilename(fileName);
   const invoiceMonth = invoiceDate ? invoiceDate.slice(0, 7) : competenceMonth;
 
-  const id = `cc_${invoiceDate || fileName}_${date}_${rawDescription
+  const id = `cc_${invoiceDate || competenceMonth}_${date}_${rawDescription
     .replace(/[^a-zA-Z0-9]/g, '')
     .toLowerCase()}_${rawAmount.toFixed(2)}_${occurrenceIndex}`;
 

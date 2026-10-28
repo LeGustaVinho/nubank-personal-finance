@@ -6,6 +6,8 @@ import {
   loadAllTransactionsFromDisk,
   parseCsvContent,
   detectCsvSourceType,
+  extractInvoiceDateFromFilename,
+  convertDdMmYyyyToIso,
 } from './csvParser.ts';
 import {
   loadUserConfig,
@@ -208,16 +210,94 @@ app.post('/api/upload', async (req, res) => {
         fs.mkdirSync(targetDir, { recursive: true });
       }
 
-      const targetPath = path.join(targetDir, finalName);
+      let resolvedFinalName = finalName;
+      let replacedPartialFiles: string[] = [];
+
+      if (detected === 'creditCard') {
+        const invDate = extractInvoiceDateFromFilename(item.fileName);
+        if (invDate) {
+          // Canonicalize filename so "Nubank_2026-11-20 (1).csv" updates "Nubank_2026-11-20.csv"
+          resolvedFinalName = `Nubank_${invDate}.csv`;
+          const existingCcFiles = fs
+            .readdirSync(targetDir)
+            .filter((f) => f.toLowerCase().endsWith('.csv'));
+          for (const existingFile of existingCcFiles) {
+            if (
+              existingFile !== resolvedFinalName &&
+              extractInvoiceDateFromFilename(existingFile) === invDate
+            ) {
+              fs.unlinkSync(path.join(targetDir, existingFile));
+              replacedPartialFiles.push(existingFile);
+            }
+          }
+        }
+      } else if (detected === 'bankAccount') {
+        // Check if the uploaded bank statement supersedes an older partial CSV of the same period
+        const newIds = new Set(
+          rows.map((r) => (r['Identificador'] || '').trim()).filter(Boolean)
+        );
+        const newMonths = new Set(
+          rows
+            .map((r) => convertDdMmYyyyToIso(r['Data'] || '').slice(0, 7))
+            .filter((m) => /^\d{4}-\d{2}$/.test(m))
+        );
+
+        if (newIds.size > 0) {
+          const existingBankFiles = fs
+            .readdirSync(targetDir)
+            .filter((f) => f.toLowerCase().endsWith('.csv'));
+
+          for (const existingFile of existingBankFiles) {
+            if (existingFile === resolvedFinalName) continue;
+            try {
+              const oldContent = fs.readFileSync(
+                path.join(targetDir, existingFile),
+                'utf-8'
+              );
+              const oldParsed = parseCsvContent(oldContent);
+              const oldIds = oldParsed.rows
+                .map((r) => (r['Identificador'] || '').trim())
+                .filter(Boolean);
+              const oldMonths = new Set(
+                oldParsed.rows
+                  .map((r) => convertDdMmYyyyToIso(r['Data'] || '').slice(0, 7))
+                  .filter((m) => /^\d{4}-\d{2}$/.test(m))
+              );
+
+              const isSubsetByIds =
+                oldIds.length > 0 && oldIds.every((id) => newIds.has(id));
+              const isSameSingleMonthSupersede =
+                newMonths.size === 1 &&
+                oldMonths.size === 1 &&
+                Array.from(newMonths)[0] === Array.from(oldMonths)[0] &&
+                rows.length >= oldParsed.rows.length;
+
+              if (isSubsetByIds || isSameSingleMonthSupersede) {
+                fs.unlinkSync(path.join(targetDir, existingFile));
+                replacedPartialFiles.push(existingFile);
+              }
+            } catch {
+              // ignore read error on old file
+            }
+          }
+        }
+      }
+
+      const targetPath = path.join(targetDir, resolvedFinalName);
       fs.writeFileSync(targetPath, item.content, 'utf-8');
 
+      const replaceNote =
+        replacedPartialFiles.length > 0
+          ? ` • Substituiu parcial: ${replacedPartialFiles.join(', ')}`
+          : '';
+
       results.push({
-        fileName: finalName,
+        fileName: resolvedFinalName,
         detectedType: detected,
-        savedPath: `${detected}/${finalName}`,
+        savedPath: `${detected}/${resolvedFinalName}`,
         rowsInFile: rows.length,
         status: 'saved',
-        message: `Salvo em ${detected}/${finalName} (${rows.length} linhas)`,
+        message: `Salvo em ${detected}/${resolvedFinalName} (${rows.length} linhas${replaceNote})`,
       });
     }
 
