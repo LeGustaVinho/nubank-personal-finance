@@ -76,6 +76,8 @@ export interface UnifiedTransaction {
   /** Notas ou tags customizadas pelo usuário */
   tags?: string[];
   notes?: string;
+  /** Ordem original da linha dentro do CSV (0, 1, 2...) para reconstituição exata de saldo em conta */
+  csvRowOrder?: number;
 }
 
 export interface GroupingRule {
@@ -153,6 +155,7 @@ export interface UserConfigStore {
   overrides: Record<string, TransactionOverride>;
   categoryBudgets: Record<string, number>;
   costTypeOverrides?: Record<string, CostTypeOverrideValue>;
+  currentBankBalance?: number | null;
 }
 
 export interface CsvFileSummary {

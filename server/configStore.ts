@@ -53,6 +53,10 @@ export function loadUserConfig(): UserConfigStore {
       overrides: parsed.overrides || {},
       categoryBudgets: parsed.categoryBudgets || {},
       costTypeOverrides: parsed.costTypeOverrides || {},
+      currentBankBalance:
+        typeof parsed.currentBankBalance === 'number' && !Number.isNaN(parsed.currentBankBalance)
+          ? parsed.currentBankBalance
+          : null,
     };
   } catch {
     return {
@@ -62,6 +66,7 @@ export function loadUserConfig(): UserConfigStore {
       overrides: {},
       categoryBudgets: {},
       costTypeOverrides: {},
+      currentBankBalance: null,
     };
   }
 }
@@ -210,6 +215,16 @@ export function setMerchantCostTypeOverride(
   } else {
     config.costTypeOverrides[merchantGroup] = costType;
   }
+  saveUserConfig(config);
+  return config;
+}
+
+export function setCurrentBankBalance(balance: number | null): UserConfigStore {
+  const config = loadUserConfig();
+  config.currentBankBalance =
+    typeof balance === 'number' && !Number.isNaN(balance)
+      ? Math.round(balance * 100) / 100
+      : null;
   saveUserConfig(config);
   return config;
 }

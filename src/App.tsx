@@ -56,6 +56,9 @@ export const App: React.FC = () => {
   const [costTypeOverrides, setCostTypeOverrides] = useState<
     Record<string, CostTypeOverrideValue>
   >({});
+  const [currentBankBalance, setCurrentBankBalance] = useState<number | null>(
+    null
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -77,6 +80,11 @@ export const App: React.FC = () => {
     setCategories(data.categories || []);
     setCategoryBudgets(data.categoryBudgets || {});
     setCostTypeOverrides(data.costTypeOverrides || {});
+    setCurrentBankBalance(
+      typeof data.currentBankBalance === 'number'
+        ? data.currentBankBalance
+        : null
+    );
   };
 
   const fetchData = async () => {
@@ -218,6 +226,17 @@ export const App: React.FC = () => {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ merchantGroup, costType }),
+    });
+    if (res.ok) {
+      applyServerState(await res.json());
+    }
+  };
+
+  const handleUpdateBankBalance = async (balance: number | null) => {
+    const res = await fetch('/api/bank-balance', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentBankBalance: balance }),
     });
     if (res.ok) {
       applyServerState(await res.json());
@@ -534,7 +553,10 @@ export const App: React.FC = () => {
             {activeTab === 'explorer' && (
               <TransactionsExplorerView
                 transactions={filteredTransactions}
+                allTransactions={transactions}
                 categories={categories}
+                currentBankBalance={currentBankBalance}
+                onUpdateBankBalance={handleUpdateBankBalance}
                 onOverrideTransaction={handleOverrideTransaction}
                 onCreateRuleFromTransaction={handleCreateRuleFromTransaction}
               />

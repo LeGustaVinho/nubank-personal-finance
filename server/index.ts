@@ -16,6 +16,7 @@ import {
   deleteRule,
   setTransactionOverride,
   setMerchantCostTypeOverride,
+  setCurrentBankBalance,
   learnPatternFromUser,
   deleteLearnedPattern,
   dismissSuggestion,
@@ -85,6 +86,8 @@ function getFullState() {
     overrides: config.overrides,
     categoryBudgets: config.categoryBudgets,
     costTypeOverrides: config.costTypeOverrides || {},
+    currentBankBalance:
+      typeof config.currentBankBalance === 'number' ? config.currentBankBalance : null,
     categories: Array.from(categorySet),
   };
 }
@@ -461,6 +464,20 @@ app.put('/api/cost-types', (req, res) => {
     res.json(getFullState());
   } catch (err: any) {
     res.status(500).json({ error: err?.message || 'Erro ao atualizar tipo de custo' });
+  }
+});
+
+app.put('/api/bank-balance', (req, res) => {
+  try {
+    const { currentBankBalance } = req.body || {};
+    const parsed =
+      currentBankBalance === null || currentBankBalance === undefined || currentBankBalance === ''
+        ? null
+        : Number(currentBankBalance);
+    setCurrentBankBalance(parsed !== null && !Number.isNaN(parsed) ? parsed : null);
+    res.json(getFullState());
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Erro ao atualizar saldo atual da conta' });
   }
 });
 

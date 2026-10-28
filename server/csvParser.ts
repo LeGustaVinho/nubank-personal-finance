@@ -423,9 +423,11 @@ export function loadAllTransactionsFromDisk(
       let totalIncome = 0;
       let validCount = 0;
 
-      for (const row of rows) {
+      for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+        const row = rows[rowIdx];
         const tx = parseBankAccountRow(row, fileName, rules, overrides, learnedPatterns);
         if (!tx) continue;
+        tx.csvRowOrder = rowIdx;
         validCount++;
         if (tx.date < minDate) minDate = tx.date;
         if (tx.date > maxDate) maxDate = tx.date;
@@ -497,6 +499,15 @@ export function loadAllTransactionsFromDisk(
 
   const rawList = Array.from(transactionMap.values()).sort((a, b) => {
     if (a.date !== b.date) return b.date.localeCompare(a.date);
+    if (
+      a.source === 'bankAccount' &&
+      b.source === 'bankAccount' &&
+      typeof a.csvRowOrder === 'number' &&
+      typeof b.csvRowOrder === 'number' &&
+      a.csvRowOrder !== b.csvRowOrder
+    ) {
+      return b.csvRowOrder - a.csvRowOrder;
+    }
     return b.id.localeCompare(a.id);
   });
 
