@@ -327,20 +327,198 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
     return list;
   }, [transactions, categoryFilter, search, sortBy]);
 
+  const hasActiveFilter = search.trim() !== '' || categoryFilter !== 'ALL';
+
+  // Baseline totals across all groups in the active period (to compute % share of the filter)
+  const periodBaselineTotals = useMemo(() => {
+    let totalNetExpense = 0;
+    let totalIncome = 0;
+    const groupNames = new Set<string>();
+
+    for (const tx of transactions) {
+      if (
+        tx.flowKind === 'cc_payment' ||
+        tx.flowKind === 'internal_transfer' ||
+        tx.flowKind === 'investment'
+      )
+        continue;
+      groupNames.add(tx.merchantGroup);
+      if (tx.flowKind === 'expense' || tx.flowKind === 'iof') {
+        totalNetExpense += Math.abs(tx.rawAmount);
+      } else if (tx.flowKind === 'refund') {
+        totalNetExpense -= Math.abs(tx.rawAmount);
+      } else if (tx.flowKind === 'income') {
+        totalIncome += tx.incomeAmount;
+      }
+    }
+
+    return {
+      totalGroups: groupNames.size,
+      totalNetExpense: Math.max(0, Math.round(totalNetExpense * 100) / 100),
+      totalIncome: Math.max(0, Math.round(totalIncome * 100) / 100),
+    };
+  }, [transactions]);
+
+  // Aggregated monthly series across all currently filtered groups
+  const filteredMonthlySeries = useMemo((): MonthlyGroupPoint[] => {
+    const mMap = new Map<string, MonthlyGroupPoint>();
+    for (const m of allTimelineMonths) {
+      mMap.set(m, {
+        month: m,
+        label: formatMonthShort(m),
+        fullLabel: formatMonthFull(m),
+        Cartao: 0,
+        Conta: 0,
+        Receita: 0,
+        Total: 0,
+        count: 0,
+      });
+    }
+
+    for (const g of groups) {
+      for (const tx of g.items) {
+        const pt = mMap.get(tx.competenceMonth);
+        if (!pt) continue;
+        if (tx.flowKind === 'expense' || tx.flowKind === 'iof') {
+          const val = Math.abs(tx.rawAmount);
+          if (tx.source === 'creditCard') pt.Cartao += val;
+          else pt.Conta += val;
+          pt.Total += val;
+          if (tx.flowKind === 'expense') pt.count += 1;
+        } else if (tx.flowKind === 'refund') {
+          const val = Math.abs(tx.rawAmount);
+          if (tx.source === 'creditCard') pt.Cartao -= val;
+          else pt.Conta -= val;
+          pt.Total -= val;
+        } else if (tx.flowKind === 'income') {
+          pt.Receita += tx.incomeAmount;
+          pt.Total += tx.incomeAmount;
+          pt.count += 1;
+        }
+      }
+    }
+
+    return Array.from(mMap.values()).map((pt) => ({
+      ...pt,
+      Cartao: Math.max(0, Math.round(pt.Cartao * 100) / 100),
+      Conta: Math.max(0, Math.round(pt.Conta * 100) / 100),
+      Receita: Math.max(0, Math.round(pt.Receita * 100) / 100),
+      Total: Math.max(0, Math.round(pt.Total * 100) / 100),
+    }));
+  }, [groups, allTimelineMonths]);
+
+  // Comprehensive statistics for the current filter in the selected period
+  const filteredStats = useMemo(() => {
+    let grossExpense = 0;
+    let iofTotal = 0;
+    let refundTotal = 0;
+    let netExpense = 0;
+    let incomeTotal = 0;
+    let ccNet = 0;
+    let bankNet = 0;
+    let purchaseCount = 0;
+    let totalTxCount = 0;
+
+    for (const g of groups) {
+      grossExpense += g.grossExpense;
+      iofTotal += g.iofTotal;
+      refundTotal += g.refundTotal;
+      netExpense += Math.max(0, g.netExpense);
+      incomeTotal += g.incomeTotal;
+      ccNet += Math.max(0, g.ccNet);
+      bankNet += Math.max(0, g.bankNet);
+      purchaseCount += g.purchaseCount;
+      totalTxCount += g.items.length;
+    }
+
+    const avgTicket = purchaseCount > 0 ? netExpense / purchaseCount : 0;
+    const shareOfPeriodExpense =
+      periodBaselineTotals.totalNetExpense > 0
+        ? (netExpense / periodBaselineTotals.totalNetExpense) * 100
+        : 0;
+
+    const activeExpenseMonths = filteredMonthlySeries.filter(
+      (m) => m.Cartao + m.Conta > 0
+    );
+    const activeMonths =
+      activeExpenseMonths.length > 0
+        ? activeExpenseMonths
+        : filteredMonthlySeries.filter((m) => m.Total > 0);
+
+    const primaryTotal = netExpense > 0 ? netExpense : incomeTotal;
+    const avgMonthlyActive =
+      activeMonths.length > 0 ? primaryTotal / activeMonths.length : 0;
+    const avgMonthlyPeriod =
+      allTimelineMonths.length > 0 ? primaryTotal / allTimelineMonths.length : 0;
+
+    const peakMonth =
+      activeMonths.length > 0
+        ? [...activeMonths].sort((a, b) => b.Total - a.Total)[0]
+        : null;
+
+    const topGroup =
+      groups.length > 0
+        ? [...groups].sort((a, b) => {
+            const valA = a.netExpense > 0 ? a.netExpense : a.incomeTotal;
+            const valB = b.netExpense > 0 ? b.netExpense : b.incomeTotal;
+            return valB - valA;
+          })[0]
+        : null;
+
+    const topGroupValue = topGroup
+      ? topGroup.netExpense > 0
+        ? topGroup.netExpense
+        : topGroup.incomeTotal
+      : 0;
+    const topGroupShare = primaryTotal > 0 ? (topGroupValue / primaryTotal) * 100 : 0;
+
+    return {
+      groupCount: groups.length,
+      grossExpense,
+      iofTotal,
+      refundTotal,
+      netExpense,
+      incomeTotal,
+      ccNet,
+      bankNet,
+      purchaseCount,
+      totalTxCount,
+      avgTicket,
+      shareOfPeriodExpense,
+      activeMonthsCount: activeMonths.length,
+      totalPeriodMonthsCount: allTimelineMonths.length,
+      avgMonthlyActive,
+      avgMonthlyPeriod,
+      peakMonth,
+      topGroup,
+      topGroupValue,
+      topGroupShare,
+    };
+  }, [groups, periodBaselineTotals, filteredMonthlySeries, allTimelineMonths]);
+
   // Active group for the top interactive chart (either expandedGroup or the #1 expense group in the current filtered list)
   const chartTargetGroup = useMemo(() => {
+    if (expandedGroup === '__ALL_FILTERED__') {
+      return null;
+    }
     if (expandedGroup) {
       const found = groups.find((g) => g.merchantGroup === expandedGroup);
       if (found) return found;
     }
+    if (hasActiveFilter && groups.length > 1) {
+      return null; // Default to showing the aggregated sum of the filtered groups when filtering
+    }
     const firstExpenseGroup = groups.find((g) => g.netExpense > 0);
     return firstExpenseGroup || groups[0] || null;
-  }, [expandedGroup, groups]);
+  }, [expandedGroup, groups, hasActiveFilter]);
+
+  const isShowingAggregatedFilterChart = !chartTargetGroup && groups.length > 0;
 
   const chartTargetSeries = useMemo(() => {
+    if (isShowingAggregatedFilterChart) return filteredMonthlySeries;
     if (!chartTargetGroup) return [];
     return buildGroupMonthlySeries(chartTargetGroup.merchantGroup);
-  }, [chartTargetGroup, buildGroupMonthlySeries]);
+  }, [isShowingAggregatedFilterChart, filteredMonthlySeries, chartTargetGroup, buildGroupMonthlySeries]);
 
   const chartTargetStats = useMemo(() => {
     const activeMonths = chartTargetSeries.filter((p) => p.Total > 0);
@@ -712,18 +890,194 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
             </select>
           </div>
         </div>
+
+        {/* Period Totals Relative to Active Filter */}
+        <div
+          className={`mt-4 pt-4 border-t ${
+            hasActiveFilter ? 'border-violet-500/30' : 'border-slate-800/80'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                <BarChart3 className="w-3.5 h-3.5 text-violet-400" />
+                {hasActiveFilter
+                  ? 'Estatísticas Totais do Filtro no Período:'
+                  : 'Estatísticas Totais de Todos os Grupos no Período:'}
+              </span>
+              {search.trim() !== '' && (
+                <span className="px-2.5 py-0.5 rounded-full bg-violet-500/20 border border-violet-500/40 text-[11px] font-semibold text-violet-200">
+                  Busca: "{search.trim()}"
+                </span>
+              )}
+              {categoryFilter !== 'ALL' && (
+                <span
+                  className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold"
+                  style={{
+                    backgroundColor: `${getCategoryColor(categoryFilter)}25`,
+                    color: getCategoryColor(categoryFilter),
+                    border: `1px solid ${getCategoryColor(categoryFilter)}50`,
+                  }}
+                >
+                  Categoria: {categoryFilter}
+                </span>
+              )}
+              <span className="text-[11px] text-slate-400">
+                ({filteredStats.groupCount} de {periodBaselineTotals.totalGroups} grupos •{' '}
+                {filteredStats.totalTxCount} lançamentos)
+              </span>
+            </div>
+
+            {hasActiveFilter && (
+              <button
+                onClick={() => {
+                  setSearch('');
+                  setCategoryFilter('ALL');
+                  setExpandedGroup(null);
+                  if (focusedGroup) onClearFocusedGroup();
+                }}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium transition cursor-pointer"
+              >
+                Limpar todos os filtros
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            {/* 1. Gasto Líquido Total no Filtro */}
+            <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/90">
+              <span className="text-[11px] text-slate-400 block">
+                Gasto Líquido Total {hasActiveFilter ? '(Filtro)' : '(Período)'}
+              </span>
+              <span className="text-base font-bold text-white mt-0.5 block">
+                {formatBRL(filteredStats.netExpense)}
+              </span>
+              <div className="text-[11px] text-slate-400 mt-1 flex items-center justify-between gap-1">
+                <span>
+                  <strong className="text-violet-300">
+                    {filteredStats.shareOfPeriodExpense.toFixed(1)}%
+                  </strong>{' '}
+                  das despesas do período
+                </span>
+                {filteredStats.incomeTotal > 0 && (
+                  <span className="text-emerald-400 font-medium">
+                    +{formatCompactBRL(filteredStats.incomeTotal)} rec.
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* 2. Divisão Cartão vs Conta */}
+            <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/90">
+              <span className="text-[11px] text-slate-400 block">
+                Cartão de Crédito vs. Conta
+              </span>
+              <div className="mt-1 space-y-1 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-violet-300 flex items-center gap-1">
+                    <CreditCard className="w-3 h-3" /> Cartão:
+                  </span>
+                  <span className="font-semibold text-white">
+                    {formatBRL(filteredStats.ccNet)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sky-300 flex items-center gap-1">
+                    <Landmark className="w-3 h-3" /> Conta:
+                  </span>
+                  <span className="font-semibold text-white">
+                    {formatBRL(filteredStats.bankNet)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Volume de Compras & Ticket Médio */}
+            <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/90">
+              <span className="text-[11px] text-slate-400 block">
+                Frequência & Ticket Médio
+              </span>
+              <span className="text-base font-bold text-emerald-300 mt-0.5 block">
+                {filteredStats.purchaseCount} compras
+              </span>
+              <span className="text-[11px] text-slate-400 mt-1 block">
+                Ticket médio:{' '}
+                <strong className="text-slate-200">
+                  {formatBRL(filteredStats.avgTicket)}
+                </strong>{' '}
+                por compra
+              </span>
+            </div>
+
+            {/* 4. Média Mensal & Pico */}
+            <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/90">
+              <span className="text-[11px] text-slate-400 block">
+                Média Mensal ({filteredStats.activeMonthsCount}m ativos)
+              </span>
+              <span className="text-base font-bold text-amber-300 mt-0.5 block">
+                {formatBRL(filteredStats.avgMonthlyActive)}/mês
+              </span>
+              <span className="text-[11px] text-slate-400 mt-1 block truncate">
+                Pico:{' '}
+                <strong className="text-rose-300">
+                  {filteredStats.peakMonth
+                    ? `${filteredStats.peakMonth.label} (${formatBRL(
+                        filteredStats.peakMonth.Total
+                      )})`
+                    : '—'}
+                </strong>
+              </span>
+            </div>
+
+            {/* 5. Maior Grupo no Filtro */}
+            <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/90">
+              <span className="text-[11px] text-slate-400 block">
+                Maior Grupo no Filtro (Top 1)
+              </span>
+              {filteredStats.topGroup ? (
+                <>
+                  <button
+                    onClick={() =>
+                      setExpandedGroup(filteredStats.topGroup!.merchantGroup)
+                    }
+                    className="text-sm font-bold text-violet-300 hover:text-violet-200 mt-0.5 block truncate max-w-full text-left cursor-pointer"
+                    title={filteredStats.topGroup.merchantGroup}
+                  >
+                    {filteredStats.topGroup.merchantGroup}
+                  </button>
+                  <span className="text-[11px] text-slate-400 mt-1 block">
+                    <strong className="text-slate-200">
+                      {formatBRL(filteredStats.topGroupValue)}
+                    </strong>{' '}
+                    ({filteredStats.topGroupShare.toFixed(1)}% do filtro)
+                  </span>
+                </>
+              ) : (
+                <span className="text-sm text-slate-500 mt-1 block">—</span>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Interactive Month-by-Month Chart Panel for Selected Group */}
-      {chartTargetGroup && (
+      {/* Interactive Month-by-Month Chart Panel for Selected Group or Aggregated Filter */}
+      {(chartTargetGroup || isShowingAggregatedFilterChart) && (
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div
                 className="p-2.5 rounded-xl"
                 style={{
-                  backgroundColor: `${getCategoryColor(chartTargetGroup.category)}20`,
-                  color: getCategoryColor(chartTargetGroup.category),
+                  backgroundColor: chartTargetGroup
+                    ? `${getCategoryColor(chartTargetGroup.category)}20`
+                    : categoryFilter !== 'ALL'
+                    ? `${getCategoryColor(categoryFilter)}20`
+                    : '#8b5cf620',
+                  color: chartTargetGroup
+                    ? getCategoryColor(chartTargetGroup.category)
+                    : categoryFilter !== 'ALL'
+                    ? getCategoryColor(categoryFilter)
+                    : '#a78bfa',
                 }}
               >
                 <BarChart3 className="w-5 h-5" />
@@ -731,37 +1085,71 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="text-base font-bold text-white">
-                    Gráfico Mês a Mês do Grupo:{' '}
-                    <span className="text-violet-300">
-                      {chartTargetGroup.merchantGroup}
-                    </span>
+                    {chartTargetGroup ? (
+                      <>
+                        Gráfico Mês a Mês do Grupo:{' '}
+                        <span className="text-violet-300">
+                          {chartTargetGroup.merchantGroup}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        Evolução Mês a Mês do Filtro:{' '}
+                        <span className="text-violet-300">
+                          {categoryFilter !== 'ALL' && search.trim()
+                            ? `${categoryFilter} + "${search.trim()}"`
+                            : categoryFilter !== 'ALL'
+                            ? categoryFilter
+                            : search.trim()
+                            ? `Busca "${search.trim()}"`
+                            : `Todos os ${groups.length} Grupos`}
+                        </span>
+                      </>
+                    )}
                   </h3>
-                  <span
-                    className="px-2.5 py-0.5 rounded-full text-[11px] font-medium"
-                    style={{
-                      backgroundColor: `${getCategoryColor(
-                        chartTargetGroup.category
-                      )}20`,
-                      color: getCategoryColor(chartTargetGroup.category),
-                    }}
-                  >
-                    {chartTargetGroup.category}
-                  </span>
+                  {chartTargetGroup && (
+                    <span
+                      className="px-2.5 py-0.5 rounded-full text-[11px] font-medium"
+                      style={{
+                        backgroundColor: `${getCategoryColor(
+                          chartTargetGroup.category
+                        )}20`,
+                        color: getCategoryColor(chartTargetGroup.category),
+                      }}
+                    >
+                      {chartTargetGroup.category}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-slate-400">
-                  Evolução mensal deste estabelecimento/grupo ao longo do ano (Cartão de Crédito + Conta Corrente)
+                  {chartTargetGroup
+                    ? 'Evolução mensal deste estabelecimento/grupo no período selecionado (Cartão de Crédito + Conta Corrente)'
+                    : `Soma mensal consolidada dos ${groups.length} grupos filtrados no período selecionado`}
                 </p>
               </div>
             </div>
 
             {/* Quick Group Selector */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-400">Grupo no gráfico:</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-400">Exibir no gráfico:</span>
               <select
-                value={chartTargetGroup.merchantGroup}
+                value={
+                  chartTargetGroup
+                    ? chartTargetGroup.merchantGroup
+                    : '__ALL_FILTERED__'
+                }
                 onChange={(e) => setExpandedGroup(e.target.value)}
                 className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs font-semibold text-white focus:outline-none focus:border-violet-500 cursor-pointer max-w-xs"
               >
+                <option value="__ALL_FILTERED__">
+                  📊 Soma do Filtro Atual ({groups.length} grupos —{' '}
+                  {formatBRL(
+                    filteredStats.netExpense > 0
+                      ? filteredStats.netExpense
+                      : filteredStats.incomeTotal
+                  )}
+                  )
+                </option>
                 {groups.map((g) => (
                   <option key={g.merchantGroup} value={g.merchantGroup}>
                     {g.merchantGroup} (
@@ -775,11 +1163,11 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
             </div>
           </div>
 
-          {/* 4 Summary KPIs for the Selected Group */}
+          {/* 4 Summary KPIs for the Selected Group / Filter */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800">
               <span className="text-[11px] text-slate-400 block">
-                Total Acumulado no Ano
+                Total Acumulado no Período
               </span>
               <span className="text-sm font-bold text-white mt-0.5 block">
                 {formatBRL(chartTargetStats.grandTotal)}
@@ -808,17 +1196,29 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
                 Frequência & Ticket Médio
               </span>
               <span className="text-sm font-bold text-emerald-300 mt-0.5 block">
-                {chartTargetGroup.purchaseCount}x •{' '}
-                {chartTargetGroup.purchaseCount > 0
-                  ? formatBRL(
-                      chartTargetGroup.netExpense / chartTargetGroup.purchaseCount
-                    )
-                  : formatBRL(chartTargetStats.grandTotal)}
+                {chartTargetGroup ? (
+                  <>
+                    {chartTargetGroup.purchaseCount}x •{' '}
+                    {chartTargetGroup.purchaseCount > 0
+                      ? formatBRL(
+                          chartTargetGroup.netExpense /
+                            chartTargetGroup.purchaseCount
+                        )
+                      : formatBRL(chartTargetStats.grandTotal)}
+                  </>
+                ) : (
+                  <>
+                    {filteredStats.purchaseCount}x •{' '}
+                    {filteredStats.purchaseCount > 0
+                      ? formatBRL(filteredStats.avgTicket)
+                      : formatBRL(chartTargetStats.grandTotal)}
+                  </>
+                )}
               </span>
             </div>
           </div>
 
-          {/* Recharts BarChart for the Selected Group */}
+          {/* Recharts BarChart for the Selected Group / Aggregated Filter */}
           <div className="h-60 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
@@ -858,17 +1258,23 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
                   ]}
                 />
                 <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '6px' }} />
-                {chartTargetGroup.netExpense <= 0 &&
-                  chartTargetGroup.incomeTotal > 0 && (
-                    <Bar
-                      dataKey="Receita"
-                      name="Recebido na Conta"
-                      fill="#10b981"
-                      radius={[4, 4, 0, 0]}
-                    />
-                  )}
-                {(chartTargetGroup.netExpense > 0 ||
-                  chartTargetGroup.incomeTotal <= 0) && (
+                {(chartTargetGroup
+                  ? chartTargetGroup.netExpense <= 0 &&
+                    chartTargetGroup.incomeTotal > 0
+                  : filteredStats.netExpense <= 0 &&
+                    filteredStats.incomeTotal > 0) && (
+                  <Bar
+                    dataKey="Receita"
+                    name="Recebido na Conta"
+                    fill="#10b981"
+                    radius={[4, 4, 0, 0]}
+                  />
+                )}
+                {(chartTargetGroup
+                  ? chartTargetGroup.netExpense > 0 ||
+                    chartTargetGroup.incomeTotal <= 0
+                  : filteredStats.netExpense > 0 ||
+                    filteredStats.incomeTotal <= 0) && (
                   <Bar
                     dataKey="Cartao"
                     name="No Cartão de Crédito"
@@ -876,8 +1282,11 @@ export const MerchantGroupsView: React.FC<MerchantGroupsViewProps> = ({
                     fill="#8b5cf6"
                   />
                 )}
-                {(chartTargetGroup.netExpense > 0 ||
-                  chartTargetGroup.incomeTotal <= 0) && (
+                {(chartTargetGroup
+                  ? chartTargetGroup.netExpense > 0 ||
+                    chartTargetGroup.incomeTotal <= 0
+                  : filteredStats.netExpense > 0 ||
+                    filteredStats.incomeTotal <= 0) && (
                   <Bar
                     dataKey="Conta"
                     name="Na Conta Corrente (Pix/Boleto/Débito)"
