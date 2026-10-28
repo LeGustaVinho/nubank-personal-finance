@@ -21,6 +21,7 @@ import {
 import { UnifiedTransaction, CostTypeOverrideValue } from '../../server/types';
 import {
   formatBRL,
+  formatCompactBRL,
   formatDateBR,
   formatMonthShort,
   getCategoryColor,
@@ -923,59 +924,63 @@ export const RecurringAndInstallmentsView: React.FC<
                       </button>
                     </div>
 
-                    <div
-                      className="grid gap-1.5 items-end pt-1"
-                      style={{
-                        gridTemplateColumns: `repeat(${Math.max(
-                          1,
-                          allMonths.length
-                        )}, minmax(0, 1fr))`,
-                      }}
-                    >
-                      {allMonths.map((m) => {
-                        const rawVal = srv.byMonth.get(m) || 0;
-                        const val = Math.max(0, rawVal);
-                        const heightPct =
-                          srv.maxMonthly > 0 && val > 0
-                            ? Math.min(
-                                100,
-                                Math.max(18, Math.round((val / srv.maxMonthly) * 100))
-                              )
-                            : 10;
-                        const shortMonthLabel = formatMonthShort(m)
-                          .split('/')[0]
-                          .replace('.', '');
+                    <div className="overflow-x-auto pb-1.5 pt-1">
+                      <div className="flex items-end gap-2 min-w-max">
+                        {allMonths.map((m) => {
+                          const rawVal = srv.byMonth.get(m) || 0;
+                          const val = Math.max(0, rawVal);
+                          const heightPct =
+                            srv.maxMonthly > 0 && val > 0
+                              ? Math.min(
+                                  100,
+                                  Math.max(18, Math.round((val / srv.maxMonthly) * 100))
+                                )
+                              : 10;
+                          const shortMonthLabel = formatMonthShort(m).replace('.', '');
 
-                        return (
-                          <div
-                            key={m}
-                            className="flex flex-col items-center min-w-0 group"
-                            title={`${formatMonthShort(m)}: ${
-                              val > 0 ? formatBRL(val) : 'Sem cobrança'
-                            }`}
-                          >
-                            {/* Isolated Bar Track with strict overflow containment */}
-                            <div className="w-full h-12 bg-slate-900/70 rounded-md p-0.5 flex items-end overflow-hidden border border-slate-800/50">
-                              <div
-                                className={`w-full rounded-sm transition-all ${
+                          return (
+                            <div
+                              key={m}
+                              className="w-14 shrink-0 flex flex-col items-center group"
+                              title={`${formatMonthShort(m)}: ${
+                                val > 0 ? formatBRL(val) : 'Sem cobrança'
+                              }`}
+                            >
+                              {/* Compact Value Label above bar */}
+                              <span
+                                className={`text-[9px] font-mono mb-1 truncate w-full text-center ${
                                   val > 0
-                                    ? srv.costType === 'digital_subscription'
-                                      ? 'bg-violet-500 group-hover:bg-violet-400'
-                                      : srv.costType === 'fixed_cost'
-                                      ? 'bg-cyan-500 group-hover:bg-cyan-400'
-                                      : 'bg-amber-500 group-hover:bg-amber-400'
-                                    : 'bg-slate-800/40'
+                                    ? 'text-slate-200 font-semibold'
+                                    : 'text-slate-600'
                                 }`}
-                                style={{ height: `${heightPct}%` }}
-                              />
+                              >
+                                {val > 0 ? formatCompactBRL(val) : '—'}
+                              </span>
+
+                              {/* Isolated Wide Bar Track */}
+                              <div className="w-10 h-14 bg-slate-900/80 rounded-lg p-1 flex items-end overflow-hidden border border-slate-800/70">
+                                <div
+                                  className={`w-full rounded transition-all ${
+                                    val > 0
+                                      ? srv.costType === 'digital_subscription'
+                                        ? 'bg-violet-500 group-hover:bg-violet-400'
+                                        : srv.costType === 'fixed_cost'
+                                        ? 'bg-cyan-500 group-hover:bg-cyan-400'
+                                        : 'bg-amber-500 group-hover:bg-amber-400'
+                                      : 'bg-slate-800/40'
+                                  }`}
+                                  style={{ height: `${heightPct}%` }}
+                                />
+                              </div>
+
+                              {/* Non-overlapping Month/Year Label */}
+                              <span className="text-[10px] font-mono text-slate-400 mt-1.5 truncate w-full text-center capitalize">
+                                {shortMonthLabel}
+                              </span>
                             </div>
-                            {/* Non-overlapping Month Label */}
-                            <span className="text-[9px] font-mono text-slate-400 mt-1.5 truncate w-full text-center capitalize">
-                              {shortMonthLabel}
-                            </span>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
 
