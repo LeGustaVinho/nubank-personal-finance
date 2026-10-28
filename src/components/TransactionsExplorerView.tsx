@@ -11,6 +11,10 @@ import {
   ArrowDown,
   Landmark,
   Save,
+  ChevronsLeft,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsRight,
 } from 'lucide-react';
 import {
   UnifiedTransaction,
@@ -70,6 +74,7 @@ export const TransactionsExplorerView: React.FC<
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [page, setPage] = useState(1);
+  const [pageJumpInput, setPageJumpInput] = useState('1');
   const pageSize = 40;
 
   // Bank Balance Anchor Input State
@@ -310,6 +315,119 @@ export const TransactionsExplorerView: React.FC<
   ]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+      setPageJumpInput(String(totalPages));
+    } else {
+      setPageJumpInput(String(page));
+    }
+  }, [page, totalPages]);
+
+  const goToPage = (target: number) => {
+    const clamped = Math.max(1, Math.min(totalPages, Math.floor(target)));
+    setPage(clamped);
+    setPageJumpInput(String(clamped));
+  };
+
+  const handleJumpPageSubmit = () => {
+    const num = Number.parseInt(pageJumpInput, 10);
+    if (!Number.isNaN(num)) {
+      goToPage(num);
+    } else {
+      setPageJumpInput(String(page));
+    }
+  };
+
+  const renderPaginationBar = (position: 'top' | 'bottom') => (
+    <div
+      className={`px-4 py-3 ${
+        position === 'top'
+          ? 'border-b border-slate-800 bg-slate-950/40'
+          : 'border-t border-slate-800 bg-slate-950/40'
+      } flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400`}
+    >
+      <span>
+        Exibindo{' '}
+        <strong className="text-slate-200">
+          {filtered.length > 0 ? (page - 1) * pageSize + 1 : 0}–
+          {Math.min(page * pageSize, filtered.length)}
+        </strong>{' '}
+        de <strong className="text-slate-200">{filtered.length}</strong>{' '}
+        lançamentos
+      </span>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          disabled={page <= 1}
+          onClick={() => goToPage(1)}
+          title="Primeira página"
+          className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-35 text-slate-200 flex items-center gap-1 cursor-pointer transition"
+        >
+          <ChevronsLeft className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Primeira</span>
+        </button>
+
+        <button
+          disabled={page <= 1}
+          onClick={() => goToPage(page - 1)}
+          title="Página anterior"
+          className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-35 text-slate-200 flex items-center gap-1 cursor-pointer transition"
+        >
+          <ChevronLeft className="w-3.5 h-3.5" />
+          <span>Anterior</span>
+        </button>
+
+        {/* Seletor e Input para Página Específica */}
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-950 border border-slate-800">
+          <span className="text-slate-400">Página</span>
+          <input
+            type="number"
+            min={1}
+            max={totalPages}
+            value={pageJumpInput}
+            onChange={(e) => setPageJumpInput(e.target.value)}
+            onBlur={handleJumpPageSubmit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleJumpPageSubmit();
+            }}
+            className="w-14 px-1.5 py-0.5 rounded bg-slate-900 border border-violet-500/40 text-center font-mono font-bold text-white focus:outline-none focus:border-violet-500"
+            title="Digite o número da página e pressione Enter"
+          />
+          <span className="text-slate-400">de</span>
+          <button
+            onClick={() => goToPage(totalPages)}
+            className="font-mono font-bold text-violet-300 hover:text-violet-200 cursor-pointer"
+            title="Ir para a última página"
+          >
+            {totalPages}
+          </button>
+        </div>
+
+        <button
+          disabled={page >= totalPages}
+          onClick={() => goToPage(page + 1)}
+          title="Próxima página"
+          className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-35 text-slate-200 flex items-center gap-1 cursor-pointer transition"
+        >
+          <span>Próxima</span>
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+
+        <button
+          disabled={page >= totalPages}
+          onClick={() => goToPage(totalPages)}
+          title="Última página"
+          className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-35 text-slate-200 flex items-center gap-1 cursor-pointer transition"
+        >
+          <span className="hidden sm:inline">Última</span>
+          <ChevronsRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+
   const paginated = useMemo(() => {
     const start = (page - 1) * pageSize;
     return filtered.slice(start, start + pageSize);
@@ -610,6 +728,9 @@ export const TransactionsExplorerView: React.FC<
 
       {/* Transactions Table with Sortable Headers */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl shadow-lg overflow-hidden">
+        {/* Top Pagination Controls */}
+        {renderPaginationBar('top')}
+
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
@@ -876,33 +997,8 @@ export const TransactionsExplorerView: React.FC<
           </table>
         </div>
 
-        {/* Pagination Footer */}
-        <div className="px-4 py-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
-          <span>
-            Exibindo {filtered.length > 0 ? (page - 1) * pageSize + 1 : 0}–
-            {Math.min(page * pageSize, filtered.length)} de {filtered.length}{' '}
-            lançamentos
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="px-3 py-1 rounded-lg bg-slate-800 disabled:opacity-40 text-slate-200 cursor-pointer"
-            >
-              Anterior
-            </button>
-            <span className="text-slate-300 font-medium">
-              Página {page} de {totalPages}
-            </span>
-            <button
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              className="px-3 py-1 rounded-lg bg-slate-800 disabled:opacity-40 text-slate-200 cursor-pointer"
-            >
-              Próxima
-            </button>
-          </div>
-        </div>
+        {/* Bottom Pagination Controls */}
+        {renderPaginationBar('bottom')}
       </div>
     </div>
   );
